@@ -1,0 +1,15 @@
+[package]
+name = "sundials"
+version = "0.1.0"
+edition = "2021"
+authors = ["Christophe Troestler <christophe.troestler@umons.ac.be>"]
+description = "One dimensional root finding algorithms"
+homepage = "https://github.com/Chris00/rust-sundials"
+repository = "https://github.com/Chris00/rust-sundials"
+documentation = "https://docs.rs/sundials"
+license = "GPL-2.0-or-later"
+keywords = ["ODE", "Initial value problem", "Cauchy problem", "sundials", "math", "science"]
+categories = ["mathematics", "science"]
+
+[dependencies]
+sundials-sys = "0.2.3"
