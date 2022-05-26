@@ -6,7 +6,7 @@
 //!
 //! # Example
 //!
-//! The following solves the equation u' = f(t,u) where f is the
+//! The following code solves the equation ∂ₜu = f(t,u) where f is the
 //! function (t,u) ↦ 1 using Adams' method.
 //!
 //! ```
