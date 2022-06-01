@@ -13,7 +13,7 @@
 //! use sundials::CVode;
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let f = |t, u: &[f64; 1], du: &mut [f64; 1]| { *du = [1.] };
-//! let ode = CVode::adams(f, 0., &[0.])?;
+//! let mut ode = CVode::adams(f, 0., &[0.])?;
 //! let mut u1 = [f64::NAN];
 //! ode.solve(1., &mut u1);
 //! assert_eq!(u1[0], 1.);
@@ -118,7 +118,6 @@ unsafe impl<const N: usize> NVector for [f64; N] {
     fn len(&self) -> usize { N }
 }
 
-
 ////////////////////////////////////////////////////////////////////////
 //
 // CVode
@@ -170,6 +169,7 @@ pub struct CVode<'a, V, F, G> {
     atol: f64,
     matrix: Matrix,
     linsolver: LinSolver,
+    rootsfound: Vec<c_int>, // cache, with len() == number of eq
     user_data: Pin<Box<UserData<F, G>>>,
 }
 
@@ -186,20 +186,22 @@ impl<'a, V, F, G> CVode<'a, V, F, G> {
     #[inline]
     fn new<G1>(cvode_mem: CVodeMem, t0: f64, y0: SharedNVector,
                rtol: f64,  atol: f64, matrix: Matrix, linsolver: LinSolver,
-               f: F, g: G1) -> CVode<'a, V, F, G1> {
+               f: F, g: G1, ng: usize) -> CVode<'a, V, F, G1> {
         let user_data = Box::pin(UserData { f, g });
         let user_data_ptr =
             user_data.as_ref().get_ref() as *const _ as *mut c_void;
         unsafe { CVodeSetUserData(cvode_mem.0, user_data_ptr) };
+        let mut rootsfound = Vec::with_capacity(ng);
+        rootsfound.resize(ng, 0);
         CVode { marker: PhantomData,
                 cvode_mem,  t0, y0, rtol, atol,
                 matrix,  linsolver,
-                user_data }
+                rootsfound, user_data }
     }
 }
 
 impl<'a, V, F> CVode<'a, V, F, ()>
-where V: NVector + Debug + Copy,
+where V: NVector,
       F: FnMut(f64, &V, &mut V) {
     /// Callback for the right-hand side of the equation.
     extern "C" fn cvrhs(t: f64, nvy: N_Vector, nvdy: N_Vector,
@@ -261,7 +263,7 @@ where V: NVector + Debug + Copy,
         }
         Ok(Self::new(cvode_mem, t0, SharedNVector(nvy0),
                      rtol, atol, Matrix(mat), LinSolver(linsolver),
-                     f, ()))
+                     f, (), 0))
     }
 
     /// Solver using the Adams linear multistep method.  Recommended
@@ -350,32 +352,52 @@ where V: NVector,
         }
         let u = *Pin::into_inner(self.user_data);
         Self::new(self.cvode_mem, self.t0, self.y0, self.rtol, self.atol,
-                  self.matrix, self.linsolver, u.f, g)
+                  self.matrix, self.linsolver, u.f, g, N)
     }
+}
+
+
+/// Return value of [`CVode::solve`] and [`CVode::step`].
+#[derive(Debug, PartialEq)]
+pub enum CV {
+    Ok,
+    Root(f64, Vec<bool>),
 }
 
 /// # Solving the IVP
 impl<'a, V, F, G> CVode<'a, V, F, G>
-where V: NVector + Debug {
-    pub fn solve(&self, t: f64, y: &mut V) -> f64 {
+where V: NVector {
+    pub fn solve(&mut self, t: f64, y: &mut V) -> CV {
         Self::integrate(self, t, y, CV_NORMAL)
     }
 
-    pub fn step(&self, t: f64, y: &mut V) -> f64 {
+    pub fn step(&mut self, t: f64, y: &mut V) -> CV {
         Self::integrate(self, t, y, CV_ONE_STEP)
     }
 
-    fn integrate(&self, t: f64, y: &mut V, itask: c_int) -> f64 {
+    fn integrate(&mut self, t: f64, y: &mut V, itask: c_int) -> CV {
         let yout = SharedNVector(V::to_nvector_mut(y));
         if t == self.t0 {
             unsafe { ptr::copy_nonoverlapping(N_VGetArrayPointer(self.y0.0),
                                               N_VGetArrayPointer(yout.0),
                                               y.len()) };
-            return t;
+            return CV::Ok;
         }
         let mut t1 = self.t0;
         let r = unsafe { CVode(self.cvode_mem.0, t, yout.0, &mut t1, itask) };
-        t1
+        match r {
+            CV_SUCCESS => CV::Ok,
+            CV_ROOT_RETURN => {
+                let ret = unsafe { CVodeGetRootInfo(
+                    self.cvode_mem.0,
+                    self.rootsfound.as_mut_ptr()) };
+                debug_assert_eq!(ret, CV_SUCCESS);
+                let z: c_int = 0;
+                let roots = self.rootsfound.iter().map(|g| g != &z).collect();
+                CV::Root(t1, roots)
+            }
+            _ => panic!("Unexpected return code {} of CVode", r),
+        }
     }
 
 }
@@ -403,8 +425,10 @@ pub struct KINSOL {}
 
 #[cfg(test)]
 mod tests {
-    use crate::CVode;
+    use crate::{CVode, CV};
 
+    /// Check that `$left` and `$right` are the same up to an absolute
+    /// error of `$tol`.
     macro_rules! assert_eq_tol {
         ($left: expr, $right: expr, $tol: expr) => {
             let left = $left;
@@ -421,7 +445,8 @@ mod tests {
 
     #[test]
     fn cvode_zero_time_step() {
-        let ode = CVode::adams(|_,_, du| { *du = [1.] }, 0., &[0.]).unwrap();
+        let mut ode = CVode::adams(|_,_, du| { *du = [1.] },
+                                   0., &[0.]).unwrap();
         let mut u1 = [f64::NAN];
         ode.solve(0., &mut u1); // make sure one can use initial time
         assert_eq!(u1, [0.]);
@@ -429,7 +454,7 @@ mod tests {
 
     #[test]
     fn cvode_exp() {
-        let ode = CVode::adams(|_,u, du| { *du = *u }, 0., &[1.]).unwrap();
+        let mut ode = CVode::adams(|_,u, du| { *du = *u }, 0., &[1.]).unwrap();
         let mut u1 = [f64::NAN];
         ode.solve(1., &mut u1);
         assert_eq_tol!(u1[0], 1f64.exp(), 1e-5);
@@ -447,10 +472,28 @@ mod tests {
     #[test]
     fn cvode_with_param() {
         let c = 1.;
-        let ode = CVode::adams(|_,_, du| { *du = [c] },
-                               0., &[0.]).unwrap();
+        let mut ode = CVode::adams(|_,_, du| { *du = [c] },
+                                   0., &[0.]).unwrap();
         let mut u1 = [f64::NAN];
         ode.solve(1., &mut u1);
         assert_eq_tol!(u1[0], c, 1e-5);
+    }
+
+    #[test]
+    fn cvode_with_root() {
+        let mut u = [f64::NAN; 2];
+        let r = CVode::adams(|_, u, du| *du = [u[1], -2.],
+                             0., &[0., 1.]).unwrap()
+            .root(|_,u, r| *r = [u[0], u[0] - 100.])
+            .solve(2., &mut u); // Time is past the root
+        match r {
+            CV::Root(t, roots) => {
+                assert_eq!(roots, vec![true, false]);
+                assert_eq_tol!(t, 1., 1e-12);
+                assert_eq_tol!(u[0], 0., 1e-12);
+                assert_eq_tol!(u[1], -1., 1e-12);
+            }
+            _ => panic!("`Root` expected")
+        }
     }
 }
