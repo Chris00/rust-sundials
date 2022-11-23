@@ -282,9 +282,7 @@ where V: NVector,
 }
 
 impl<'a, V, F, G> CVode<'a, V, F, G>
-where V: NVector,
-      F: FnMut(f64, &V, &mut V) + Unpin,
-      G: Unpin {
+where V: NVector {
     pub fn rtol(self, rtol: f64) -> Self {
         unsafe { CVodeSStolerances(self.cvode_mem.0, rtol, self.atol); }
         self
@@ -315,8 +313,13 @@ where V: NVector,
         unsafe { CVodeSetMaxHnilWarns(self.cvode_mem.0, n as _) };
         self
     }
+}
 
-    /// # Root-finding capabilities
+/// # Root-finding capabilities
+impl<'a, V, F, G> CVode<'a, V, F, G>
+where V: NVector,
+      F: FnMut(f64, &V, &mut V) + Unpin,
+      G: Unpin {
 
     /// Callback for the root-finding callback for `N` functions,
     /// where `N` is known at compile time.
