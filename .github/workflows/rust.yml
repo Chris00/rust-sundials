@@ -66,5 +66,5 @@ jobs:
       run: rustup update ${{ matrix.rust }} --no-self-update && rustup default ${{ matrix.rust }}
       shell: bash
     - run: rustup target add ${{ matrix.target }}
-    - run: cargo build
-    - run: cargo test
+    - run: cargo build --verbose
+    - run: cargo test --verbose
