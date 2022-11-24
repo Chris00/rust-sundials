@@ -12,7 +12,7 @@ keywords = ["ODE", "Initial value problem", "Cauchy problem", "sundials", "math"
 categories = ["mathematics", "science"]
 
 [dependencies]
-sundials-sys = "0.2.3"
+sundials-sys = { version = "0.2.3", git = "https://github.com/Chris00/sundials-sys.git" }
 
 [dev-dependencies]
 eyre = "0.6.8"
