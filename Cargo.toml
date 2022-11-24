@@ -13,3 +13,6 @@ categories = ["mathematics", "science"]
 
 [dependencies]
 sundials-sys = "0.2.3"
+
+[dev-dependencies]
+eyre = "0.6.8"

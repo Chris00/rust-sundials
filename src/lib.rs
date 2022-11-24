@@ -499,4 +499,13 @@ mod tests {
             _ => panic!("`Root` expected")
         }
     }
+
+    #[test]
+    fn compatible_with_eyre() -> eyre::Result<()> {
+        fn f(t: f64, y: &[f64; 1], dy: &mut [f64; 1]) {
+            *dy = [t * y[0]];
+        }
+        let _ = CVode::adams(f, 0., &[1.])?;
+        Ok(())
+    }
 }
