@@ -67,4 +67,5 @@ jobs:
       shell: bash
     - run: rustup target add ${{ matrix.target }}
     - run: cargo build --verbose
-    - run: cargo test --verbose
+    # - run: cargo test --verbose
+    - run: cargo run --example basic
