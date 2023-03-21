@@ -1,7 +1,7 @@
 use sundials::CVode;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let f = |t, u: &[f64; 1], du: &mut [f64; 1]| {
+    let f = |_t, _u: &[f64; 1], du: &mut [f64; 1]| {
         *du = [1.]
     };
     let mut ode = CVode::adams(f, 0., &[0.])?;
