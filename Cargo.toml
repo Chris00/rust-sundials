@@ -11,6 +11,9 @@ license = "GPL-2.0-or-later"
 keywords = ["ODE", "math", "numerics", "simulation", "science"]
 categories = ["mathematics", "science"]
 
+[build-dependencies]
+sundials-sys = { version = "0.2.3", git = "https://github.com/Chris00/sundials-sys.git" }
+
 [dependencies]
 sundials-sys = { version = "0.2.3", git = "https://github.com/Chris00/sundials-sys.git" }
 

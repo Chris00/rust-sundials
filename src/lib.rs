@@ -64,6 +64,43 @@ impl std::error::Error for Error {}
 
 ////////////////////////////////////////////////////////////////////////
 //
+// SUNContext
+
+pub struct Context(
+    #[cfg(has_context)]
+    SUNContext,
+    #[cfg(not(has_context))]
+    PhantomData<()>,
+);
+
+#[cfg(has_context)]
+impl Drop for Context {
+    fn drop(&mut self) {
+        // FIXME: Make sure the remark about MPI is followed (when
+        // this library allows MPI)
+        // https://sundials.readthedocs.io/en/latest/sundials/SUNContext_link.html#c.SUNContext_Free
+        unsafe { SUNContext_Free(self.0 as *mut _); }
+    }
+}
+
+impl Context {
+    #[cfg(has_context)]
+    fn new() -> Result<Self, Error> {
+        let mut ctx: SUNContext = ptr::null_mut();
+        if unsafe { SUNContext_Create(ptr::null_mut(),
+                                      &mut ctx as *mut _) } < 0 {
+            return Err(Error::Fail { name: "Context::new",
+                                     msg: "Failed to create a context" })
+        }
+        Ok(Context(ctx))
+    }
+    #[cfg(not(has_context))]
+    fn new() -> Result<Self, Error> { Ok(Context(PhantomData)) }
+
+}
+
+////////////////////////////////////////////////////////////////////////
+//
 // NVector
 
 // AsRef<[f64]> does not even seem to ne needed??  Beware of
@@ -82,13 +119,16 @@ pub unsafe trait NVector: AsRef<[f64]> + Clone {
 
     // FIXME: should depend on Self::Ops
     /// Share data.
-    fn to_nvector(v: &Self) -> N_Vector;
-    fn to_nvector_mut(v: &mut Self) -> N_Vector;
+    fn to_nvector(v: &Self, ctx: &Context) -> N_Vector;
+    fn to_nvector_mut(v: &mut Self, ctx: &Context) -> N_Vector;
 
     fn len(&self) -> usize;
 }
 
 unsafe impl<const N: usize> NVector for [f64; N] {
+    type Ops = PhantomData<()>;
+    fn ops() -> Self::Ops { PhantomData }
+
     #[inline]
     fn from_nvector<'a>(nv: N_Vector) -> &'a Self {
         unsafe { &*(N_VGetArrayPointer(nv) as *const [f64; N]) }
@@ -100,19 +140,22 @@ unsafe impl<const N: usize> NVector for [f64; N] {
     }
 
     #[inline]
-    fn to_nvector(v: &Self) -> N_Vector {
-        unsafe { N_VMake_Serial(N.try_into().unwrap(),
-                                v.as_ptr() as *mut _) }
+    fn to_nvector(v: &Self, ctx: &Context) -> N_Vector {
+        #[cfg(sundials_major = "6")] {
+            unsafe { N_VMake_Serial(N.try_into().unwrap(),
+                                    v.as_ptr() as *mut _,
+                                    #[cfg(has_context)] ctx.0) }
+        }
     }
 
     #[inline]
-    fn to_nvector_mut(v: &mut Self) -> N_Vector {
-        unsafe { N_VMake_Serial(N.try_into().unwrap(),
-                                v.as_mut_ptr()) }
+    fn to_nvector_mut(v: &mut Self, ctx: &Context) -> N_Vector {
+        #[cfg(sundials_major = "6")] {
+            unsafe { N_VMake_Serial(N.try_into().unwrap(),
+                                    v.as_mut_ptr(),
+                                    #[cfg(has_context)] ctx.0) }
+        }
     }
-
-    type Ops = PhantomData<()>;
-    fn ops() -> Self::Ops { PhantomData }
 
     #[inline]
     fn len(&self) -> usize { N }
@@ -156,12 +199,13 @@ impl Drop for LinSolver {
 /// Solver for stiff and nonstiff initial value problems for ODE systems.
 ///
 /// The generic parameters are as follows; `V` is the type of vectors,
-/// `f` the type of the function being used as right-hand side of the
+/// `F` the type of the function being used as right-hand side of the
 /// ODE, and `G` is the type of the functions (if any) of which we
 /// want to seek roots.
 pub struct CVode<'a, V, F, G> {
     // 'a for C vectors held by the solver
     marker: PhantomData<&'a V>,
+    ctx: Context,
     cvode_mem: CVodeMem,
     t0: f64,
     y0: SharedNVector,
@@ -184,7 +228,8 @@ struct UserData<F, G> {
 
 impl<'a, V, F, G> CVode<'a, V, F, G> {
     #[inline]
-    fn new<G1>(cvode_mem: CVodeMem, t0: f64, y0: SharedNVector,
+    fn new<G1>(ctx: Context,
+               cvode_mem: CVodeMem, t0: f64, y0: SharedNVector,
                rtol: f64,  atol: f64, matrix: Matrix, linsolver: LinSolver,
                f: F, g: G1, ng: usize) -> CVode<'a, V, F, G1> {
         let user_data = Box::pin(UserData { f, g });
@@ -194,6 +239,7 @@ impl<'a, V, F, G> CVode<'a, V, F, G> {
         let mut rootsfound = Vec::with_capacity(ng);
         rootsfound.resize(ng, 0);
         CVode { marker: PhantomData,
+                ctx,
                 cvode_mem,  t0, y0, rtol, atol,
                 matrix,  linsolver,
                 rootsfound, user_data }
@@ -227,13 +273,15 @@ where V: NVector,
     #[inline]
     fn init(name: &'static str, lmm: c_int,
             f: F, t0: f64, y0: &'a V) -> Result<Self, Error> {
+        let ctx = Context::new()?;
         // FIXME: who will reclaim the N_Vector from y0?  Need to wrap it to
         // enable a `Drop`.
-        let cvode_mem = unsafe { CVodeMem(CVodeCreate(lmm)) };
+        let cvode_mem = unsafe {
+            CVodeMem(CVodeCreate(lmm, #[cfg(has_context)] ctx.0)) };
         if cvode_mem.0.is_null() {
             return Err(Error::Fail{name, msg: "Allocation failed"})
         }
-        let nvy0 = V::to_nvector(y0);
+        let nvy0 = V::to_nvector(y0, &ctx);
         let r = unsafe { CVodeInit(cvode_mem.0, Some(Self::cvrhs), t0, nvy0) };
         if r == CV_MEM_FAIL {
             let msg = "a memory allocation request has failed";
@@ -248,20 +296,24 @@ where V: NVector,
         // Set default tolerances (otherwise the solver will complain).
         unsafe { CVodeSStolerances(cvode_mem.0, rtol, atol); }
         // Set the default linear solver (FIXME: configurable)
-        let mat = unsafe { SUNDenseMatrix(y0.len() as _, y0.len() as _) };
+        let mat = unsafe {
+            SUNDenseMatrix(y0.len() as _, y0.len() as _,
+                           #[cfg(has_context)] ctx.0) };
         if mat.is_null() {
             return Err(Error::Fail{name, msg: "matrix allocation failed"})
         }
-        let linsolver = unsafe { SUNLinSol_Dense(nvy0, mat) };
+        let linsolver = unsafe {
+            SUNLinSol_Dense(nvy0, mat, #[cfg(has_context)] ctx.0) };
         if linsolver.is_null() {
             return Err(Error::Fail{
                 name, msg: "linear solver  allocation failed"})
         }
-        let r = unsafe { CVodeSetLinearSolver(cvode_mem.0, linsolver, mat) };
+        let r = unsafe {
+            CVodeSetLinearSolver(cvode_mem.0, linsolver, mat) };
         if r != CVLS_SUCCESS as i32 {
             return Err(Error::Fail{name, msg: "could not attach linear solver"})
         }
-        Ok(Self::new(cvode_mem, t0, SharedNVector(nvy0),
+        Ok(Self::new(ctx, cvode_mem, t0, SharedNVector(nvy0),
                      rtol, atol, Matrix(mat), LinSolver(linsolver),
                      f, (), 0))
     }
@@ -354,7 +406,8 @@ where V: NVector,
             panic!("Sundials::CVode::root: memory allocation failed.");
         }
         let u = *Pin::into_inner(self.user_data);
-        Self::new(self.cvode_mem, self.t0, self.y0, self.rtol, self.atol,
+        Self::new(self.ctx,
+                  self.cvode_mem, self.t0, self.y0, self.rtol, self.atol,
                   self.matrix, self.linsolver, u.f, g, N)
     }
 }
@@ -365,6 +418,8 @@ where V: NVector,
 pub enum CV {
     Ok,
     Root(f64, Vec<bool>),
+    ErrFailure,
+    ConvFailure,
 }
 
 /// # Solving the IVP
@@ -379,7 +434,7 @@ where V: NVector {
     }
 
     fn integrate(&mut self, t: f64, y: &mut V, itask: c_int) -> CV {
-        let yout = SharedNVector(V::to_nvector_mut(y));
+        let yout = SharedNVector(V::to_nvector_mut(y, &self.ctx));
         if t == self.t0 {
             unsafe { ptr::copy_nonoverlapping(N_VGetArrayPointer(self.y0.0),
                                               N_VGetArrayPointer(yout.0),
@@ -390,6 +445,7 @@ where V: NVector {
         let r = unsafe { CVode(self.cvode_mem.0, t, yout.0, &mut t1, itask) };
         match r {
             CV_SUCCESS => CV::Ok,
+            //CV_TSTOP_RETURN => ,
             CV_ROOT_RETURN => {
                 let ret = unsafe { CVodeGetRootInfo(
                     self.cvode_mem.0,
@@ -399,7 +455,16 @@ where V: NVector {
                 let roots = self.rootsfound.iter().map(|g| g != &z).collect();
                 CV::Root(t1, roots)
             }
-            _ => panic!("Unexpected return code {} of CVode", r),
+            CV_MEM_NULL | CV_NO_MALLOC | CV_ILL_INPUT => unreachable!(),
+            CV_TOO_MUCH_WORK => panic!("Too much work"),
+            CV_TOO_MUCH_ACC => panic!("Could not satisfy desired accuracy"),
+            CV_ERR_FAILURE => CV::ErrFailure,
+            CV_CONV_FAILURE => CV::ConvFailure,
+            CV_LINIT_FAIL => panic!("CV_LINIT_FAIL"),
+            CV_LSETUP_FAIL => panic!("CV_LSETUP_FAIL"),
+            CV_LSOLVE_FAIL => panic!("CV_LSOLVE_FAIL"),
+            CV_RTFUNC_FAIL => panic!("The root function failed"),
+            _ => panic!("sundials::CVode: unexpected return code {}", r),
         }
     }
 
