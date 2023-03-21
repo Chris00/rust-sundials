@@ -141,20 +141,16 @@ unsafe impl<const N: usize> NVector for [f64; N] {
 
     #[inline]
     fn to_nvector(v: &Self, ctx: &Context) -> N_Vector {
-        #[cfg(sundials_major = "6")] {
-            unsafe { N_VMake_Serial(N.try_into().unwrap(),
-                                    v.as_ptr() as *mut _,
-                                    #[cfg(has_context)] ctx.0) }
-        }
+        unsafe { N_VMake_Serial(N.try_into().unwrap(),
+                                v.as_ptr() as *mut _,
+                                #[cfg(has_context)] ctx.0) }
     }
 
     #[inline]
     fn to_nvector_mut(v: &mut Self, ctx: &Context) -> N_Vector {
-        #[cfg(sundials_major = "6")] {
-            unsafe { N_VMake_Serial(N.try_into().unwrap(),
-                                    v.as_mut_ptr(),
-                                    #[cfg(has_context)] ctx.0) }
-        }
+        unsafe { N_VMake_Serial(N.try_into().unwrap(),
+                                v.as_mut_ptr(),
+                                #[cfg(has_context)] ctx.0) }
     }
 
     #[inline]
