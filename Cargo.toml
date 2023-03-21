@@ -8,7 +8,7 @@ homepage = "https://github.com/Chris00/rust-sundials"
 repository = "https://github.com/Chris00/rust-sundials"
 documentation = "https://docs.rs/sundials"
 license = "GPL-2.0-or-later"
-keywords = ["ODE", "Initial value problem", "Cauchy problem", "sundials", "math", "science"]
+keywords = ["ODE", "math", "numerics", "simulation", "science"]
 categories = ["mathematics", "science"]
 
 [dependencies]
