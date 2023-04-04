@@ -12,8 +12,7 @@
 //! ```
 //! use sundials::CVode;
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let f = |t, u: &[f64; 1], du: &mut [f64; 1]| { *du = [1.] };
-//! let mut ode = CVode::adams(f, 0., &[0.])?;
+//! let mut ode = CVode::adams(0., &[0.], |t, u, du| *du = [1.])?;
 //! let mut u1 = [f64::NAN];
 //! ode.solve(1., &mut u1);
 //! assert_eq!(u1[0], 1.);
@@ -268,7 +267,7 @@ where V: NVector,
     /// Initialize a CVode with method `llm`.
     #[inline]
     fn init(name: &'static str, lmm: c_int,
-            f: F, t0: f64, y0: &'a V) -> Result<Self, Error> {
+            t0: f64, y0: &'a V, f: F) -> Result<Self, Error> {
         let ctx = Context::new()?;
         // FIXME: who will reclaim the N_Vector from y0?  Need to wrap it to
         // enable a `Drop`.
@@ -317,15 +316,15 @@ where V: NVector,
     /// Solver using the Adams linear multistep method.  Recommended
     /// for non-stiff problems.
     // The fixed-point solver is recommended for nonstiff problems.
-    pub fn adams(f: F, t0: f64, y0: &'a V) -> Result<Self, Error> {
-        Self::init("CVode::adams", CV_ADAMS, f, t0, y0)
+    pub fn adams(t0: f64, y0: &'a V, f: F) -> Result<Self, Error> {
+        Self::init("CVode::adams", CV_ADAMS, t0, y0, f)
     }
 
     /// Solver using the BDF linear multistep method.  Recommended for
     /// stiff problems.
     // The default Newton iteration is recommended for stiff problems,
-    pub fn bdf(f: F, t0: f64, y0: &'a V) -> Result<Self, Error> {
-        Self::init("CVode::bdf", CV_BDF, f, t0, y0)
+    pub fn bdf(t0: f64, y0: &'a V, f: F) -> Result<Self, Error> {
+        Self::init("CVode::bdf", CV_BDF, t0, y0, f)
     }
 }
 
@@ -509,8 +508,7 @@ mod tests {
 
     #[test]
     fn cvode_zero_time_step() {
-        let mut ode = CVode::adams(|_,_, du| { *du = [1.] },
-                                   0., &[0.]).unwrap();
+        let mut ode = CVode::adams(0., &[0.], |_,_, du| *du = [1.]).unwrap();
         let mut u1 = [f64::NAN];
         ode.solve(0., &mut u1); // make sure one can use initial time
         assert_eq!(u1, [0.]);
@@ -518,7 +516,7 @@ mod tests {
 
     #[test]
     fn cvode_exp() {
-        let mut ode = CVode::adams(|_,u, du| { *du = *u }, 0., &[1.]).unwrap();
+        let mut ode = CVode::adams(0., &[1.], |_,u, du| *du = *u).unwrap();
         let mut u1 = [f64::NAN];
         ode.solve(1., &mut u1);
         assert_eq_tol!(u1[0], 1f64.exp(), 1e-5);
@@ -526,8 +524,8 @@ mod tests {
 
     #[test]
     fn cvode_sin() {
-        let ode = CVode::adams(|_, u, du| { *du = [u[1], -u[0]] },
-                               0., &[0., 1.]).unwrap();
+        let ode = CVode::adams(0., &[0., 1.],
+                               |_, u, du| *du = [u[1], -u[0]]).unwrap();
         let mut u1 = [f64::NAN, f64::NAN];
         ode.mxsteps(500).solve(1., &mut u1);
         assert_eq_tol!(u1[0], 1f64.sin(), 1e-5);
@@ -536,8 +534,8 @@ mod tests {
     #[test]
     fn cvode_with_param() {
         let c = 1.;
-        let mut ode = CVode::adams(|_,_, du| { *du = [c] },
-                                   0., &[0.]).unwrap();
+        let mut ode = CVode::adams(0., &[0.],
+                                   |_,_, du| *du = [c]).unwrap();
         let mut u1 = [f64::NAN];
         ode.solve(1., &mut u1);
         assert_eq_tol!(u1[0], c, 1e-5);
@@ -546,8 +544,8 @@ mod tests {
     #[test]
     fn cvode_with_root() {
         let mut u = [f64::NAN; 2];
-        let r = CVode::adams(|_, u, du| *du = [u[1], -2.],
-                             0., &[0., 1.]).unwrap()
+        let r = CVode::adams(0., &[0., 1.],
+                             |_, u, du| *du = [u[1], -2.]).unwrap()
             .root(|_,u, r| *r = [u[0], u[0] - 100.])
             .solve(2., &mut u); // Time is past the root
         match r {
@@ -563,10 +561,7 @@ mod tests {
 
     #[test]
     fn compatible_with_eyre() -> eyre::Result<()> {
-        fn f(t: f64, y: &[f64; 1], dy: &mut [f64; 1]) {
-            *dy = [t * y[0]];
-        }
-        let _ = CVode::adams(f, 0., &[1.])?;
+        let _ = CVode::adams(0., &[1.], |t, y, dy| *dy = [t * y[0]])?;
         Ok(())
     }
 }
