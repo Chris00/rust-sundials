@@ -7,7 +7,7 @@ description = "One dimensional root finding algorithms"
 homepage = "https://github.com/Chris00/rust-sundials"
 repository = "https://github.com/Chris00/rust-sundials"
 documentation = "https://docs.rs/sundials"
-license = "GPL-2.0-or-later"
+license = "BSD-3-Clause"
 keywords = ["ODE", "math", "numerics", "simulation", "science"]
 categories = ["mathematics", "science"]
 
