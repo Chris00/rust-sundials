@@ -465,6 +465,16 @@ where V: NVector {
 
 }
 
+impl<'a, const N: usize, F, G> CVode<'a, [f64; N], F, G> {
+    /// Return the solution at time `t`.
+    // FIXME: provide it for any type `V` — which must implement a
+    // creation function.
+    pub fn solution(&mut self, t: f64) -> ([f64; N], CV) {
+        let mut y = [f64::NAN; N];
+        let cv = self.solve(t, &mut y);
+        (y, cv)
+    }
+}
 
 /// ODE systems, including sensitivity analysis capabilities (forward
 /// and adjoint).
