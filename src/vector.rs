@@ -1,6 +1,6 @@
 //! Vectors
 
-use std::{mem, slice};
+use std::{mem, slice, marker::PhantomData};
 use sundials_sys::*;
 use super::Context;
 
@@ -55,8 +55,8 @@ pub unsafe trait Vector: Clone {
 /// Rust value.  This is used internally to convert Rust values to
 /// appropriate input/outputs for Sundials routines.
 pub struct SharedSerial<V> {
-    v: V,
     pub(crate) nv: N_Vector,
+    marker: PhantomData<V>, // Lifetime of the Rust vector
 }
 
 impl<V> Drop for SharedSerial<V> {
@@ -106,7 +106,7 @@ unsafe impl<const N: usize> Vector for [f64; N] {
                 N.try_into().unwrap(),
                 self.as_ptr() as *mut _,
                 ctx) };
-        SharedSerial { v: self, nv }
+        SharedSerial { nv, marker: PhantomData }
     }
 
     type NVectorMut<'a> = SharedSerial<&'a mut [f64; N]>;
@@ -119,7 +119,7 @@ unsafe impl<const N: usize> Vector for [f64; N] {
                 N.try_into().unwrap(),
                 self.as_mut_ptr(),
                 ctx) };
-        SharedSerial { v: self, nv }
+            SharedSerial { nv, marker: PhantomData }
     }
 
     #[inline]
@@ -188,7 +188,7 @@ where V: AsVector {
                 self.len().try_into().unwrap(),
                 self.as_ref().as_ptr() as *mut _,
                 ctx) };
-        SharedSerial {v: self, nv }
+        SharedSerial { nv, marker: PhantomData }
     }
 
     type NVectorMut<'a> = SharedSerial<&'a mut V>;
@@ -202,7 +202,7 @@ where V: AsVector {
                 self.len().try_into().unwrap(),
                 self.as_mut().as_ptr() as *mut _,
                 ctx) };
-        SharedSerial {v: self, nv }
+        SharedSerial { nv, marker: PhantomData }
     }
 
     #[inline]
