@@ -359,3 +359,116 @@ where Ctx: Context {
         (y, cv)
     }
 }
+
+
+
+#[cfg(test)]
+mod tests {
+    use crate::{context, CVode, cvode::CV};
+
+    #[test]
+    fn cvode_zero_time_step() {
+        let ctx = context!(P0).unwrap();
+        let mut ode = CVode::adams(ctx, 0., &[0.],
+            |_,_, du| *du = [1.]).unwrap();
+        let mut u1 = [f64::NAN];
+        ode.solve(0., &mut u1); // make sure one can use initial time
+        assert_eq!(u1, [0.]);
+    }
+
+    #[test]
+    fn cvode_solution() {
+        let ctx = context!().unwrap();
+        let mut ode = CVode::adams(ctx, 0., &[0.],
+            |_,_, du| *du = [1.]).unwrap();
+        assert_eq!(ode.solution(1.).0, [1.]);
+    }
+
+    #[test]
+    fn cvode_exp() {
+        let ctx = context!().unwrap();
+        let mut ode = CVode::adams(ctx, 0., &[1.],
+            |_,u, du| *du = *u).unwrap();
+        let mut u1 = [f64::NAN];
+        ode.solve(1., &mut u1);
+        assert_eq_tol!(u1[0], 1f64.exp(), 1e-5);
+    }
+
+    #[test]
+    fn cvode_sin() {
+        let ctx = context!().unwrap();
+        let ode = CVode::adams(ctx, 0., &[0., 1.], |_, u, du: &mut [_;2]| {
+            *du = [u[1], -u[0]]
+        }).unwrap();
+        let mut u1 = [f64::NAN, f64::NAN];
+        ode.mxsteps(500).solve(1., &mut u1);
+        assert_eq_tol!(u1[0], 1f64.sin(), 1e-5);
+    }
+
+    #[test]
+    fn cvode_move() {
+        let ctx = context!().unwrap();
+        let init = [0.];
+        let ode = move || {
+            CVode::adams(ctx, 0., &init, |_,_, du| *du = [1.]).unwrap()
+        };
+        assert_eq!(ode().solution(1.).0, [1.]);
+    }
+
+    #[test]
+    fn cvode_refs() {
+        let init = [1., 2.];
+        let ode = || {
+            let ctx = context!().unwrap();
+            CVode::adams(ctx, 0., &init, |_,_, du: &mut [_;2]| {
+                *du = [1., 1.]
+            }).unwrap()
+        };
+        assert_eq!(ode().solution(1.).0, [2., 3.]);
+        let (u, cv) = ode()
+            .root(|_, &u, z| *z = [u[0] - 2.])
+            .solution(2.);
+        assert!(matches!(cv, CV::Root(_,_)));
+        assert_eq!(u, [2., 3.]);
+        assert_eq!(ode().solution(2.).0, [3., 4.]);
+    }
+
+    #[test]
+    fn cvode_with_param() {
+        let ctx = context!().unwrap();
+        let c = 1.;
+        let mut ode = CVode::adams(ctx, 0., &[0.],
+                                   |_,_, du| *du = [c]).unwrap();
+        let mut u1 = [f64::NAN];
+        ode.solve(1., &mut u1);
+        assert_eq_tol!(u1[0], c, 1e-5);
+    }
+
+    #[test]
+    fn cvode_with_root() {
+        let ctx = context!().unwrap();
+        let mut u = [f64::NAN; 2];
+        let r = CVode::adams(ctx, 0., &[0., 1.],  |_, u, du: &mut [_;2]| {
+            *du = [u[1], -2.]
+        }).unwrap()
+            .root(|_,u, r| *r = [u[0], u[0] - 100.])
+            .solve(2., &mut u); // Time is past the root
+        match r {
+            CV::Root(t, roots) => {
+                assert_eq!(roots, vec![true, false]);
+                assert_eq_tol!(t, 1., 1e-12);
+                assert_eq_tol!(u[0], 0., 1e-12);
+                assert_eq_tol!(u[1], -1., 1e-12);
+            }
+            _ => panic!("`Root` expected")
+        }
+    }
+
+    #[test]
+    fn compatible_with_eyre() -> eyre::Result<()> {
+        let ctx = context!().unwrap();
+        let _ = CVode::adams(ctx, 0., &[1.], |t, y, dy: &mut [_;1]| {
+            *dy = [t * y[0]] })?;
+        Ok(())
+    }
+}
