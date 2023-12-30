@@ -88,7 +88,7 @@ impl std::error::Error for Error {}
 
 ////////////////////////////////////////////////////////////////////////
 //
-// SUNContext
+// Context
 
 // According to the [SUNContext][] documentation,
 // - all objects in a simulation (solver, vectors,...) must share the
@@ -174,7 +174,7 @@ macro_rules! context {
             }
             impl $crate::Context for $name {
                 #[inline]
-                fn as_ptr(&self) -> ::sundials_sys::SUNContext {
+                fn as_ptr(&self) -> $crate::__SUNContext {
                     self.ctx.as_ptr()
                 }
 
@@ -192,6 +192,10 @@ macro_rules! context {
     };
     // FIXME: Add a third case when a MPI communicator is needed.
 }
+
+#[doc(hidden)]
+/// Make `SUNContext` visible for the `context` macro to work
+pub use sundials_sys::SUNContext as __SUNContext;
 
 #[doc(hidden)]
 /// A wrapper around `SUNContext` that ensures it is memory managed by Rust.
