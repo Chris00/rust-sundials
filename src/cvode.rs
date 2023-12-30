@@ -227,6 +227,23 @@ where V: Vector {
         self
     }
 
+    /// Specifies the value `tstop` of the independent variable t past
+    /// which the solution is not to proceed.  Return `false` if
+    /// `tstop` is not beyond the current t value.
+    // Using [`f64::NAN`] disables the stop time.
+    // (Requires version 6.5.1)
+    pub fn set_tstop(&mut self, tstop: f64) -> bool {
+        if tstop.is_nan() {
+            // unsafe { CVodeClearStopTime(self.cvode_mem.0); }
+            true
+        } else {
+            let ret = unsafe { CVodeSetStopTime(
+                self.cvode_mem.0,
+                tstop) };
+            ret == CV_ILL_INPUT
+        }
+    }
+
     /// Specifies the maximum number of messages issued by the solver
     /// warning that t + h = t on the next internal step.
     pub fn max_hnil_warns(self, n: usize) -> Self {
@@ -294,6 +311,9 @@ where Ctx: Context,
 #[derive(Debug, PartialEq)]
 pub enum CVStatus {
     Ok,
+    /// Succeeded by reaching the stopping point specified through
+    /// [`CVode::set_tstop`].
+    Tstop(f64),
     Root(f64, Vec<bool>),
     /// The initial time `t0` and the output time `t` are too close to
     /// each other and the user did not specify an initial step size.
@@ -341,15 +361,15 @@ where Ctx: Context,
         //         n) };
         //     return CV::Ok;
         // }
-        let mut t1 = self.t0;
+        let mut tret = self.t0;
         let r = unsafe { CVode(
             self.cvode_mem.0,
             t,
             V::as_mut_ptr(&yout),
-            &mut t1, itask) };
+            &mut tret, itask) };
         match r {
             CV_SUCCESS => CVStatus::Ok,
-            //CV_TSTOP_RETURN => ,
+            CV_TSTOP_RETURN => CVStatus::Tstop(tret),
             CV_ROOT_RETURN => {
                 let ret = unsafe { CVodeGetRootInfo(
                     self.cvode_mem.0,
@@ -357,7 +377,7 @@ where Ctx: Context,
                 debug_assert_eq!(ret, CV_SUCCESS);
                 let z: c_int = 0;
                 let roots = self.rootsfound.iter().map(|g| g != &z).collect();
-                CVStatus::Root(t1, roots)
+                CVStatus::Root(tret, roots)
             }
             CV_MEM_NULL | CV_NO_MALLOC => unreachable!(),
             CV_ILL_INPUT => panic!("CV_ILL_INPUT"),
