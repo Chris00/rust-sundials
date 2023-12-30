@@ -12,7 +12,7 @@ keywords = ["ODE", "math", "numerics", "simulation", "science"]
 categories = ["mathematics", "science"]
 
 [dependencies]
-sundials-sys = "0.3.0"
+sundials-sys = "0.4.0"
 mpi = { version = "0.7.0", optional = true, default-features = false }
 
 [dev-dependencies]
