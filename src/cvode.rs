@@ -287,9 +287,18 @@ where Ctx: Context,
 
 /// Return value of [`CVode::solve`] and [`CVode::step`].
 #[derive(Debug, PartialEq)]
-pub enum CV {
+pub enum CVStatus {
     Ok,
     Root(f64, Vec<bool>),
+    /// The initial time `t0` and the output time `t` are too close to
+    /// each other and the user did not specify an initial step size.
+    TooClose,
+    /// The solver took [`mxstep`] internal steps but could not reach the
+    /// final time.
+    TooMuchWork,
+    /// The solver could not satisfy the accuracy demanded by the user
+    /// for some internal step.
+    TooMuchAcc,
     ErrFailure,
     ConvFailure,
 }
@@ -301,15 +310,15 @@ where Ctx: Context,
     // FIXME: for arrays, it would be more convenient to return the
     // array.  For types that are not on the stack (i.e. not Copy),
     // taking it as an additional parameter is better.
-    pub fn solve(&mut self, t: f64, y: &mut V) -> CV {
+    pub fn solve(&mut self, t: f64, y: &mut V) -> CVStatus {
         Self::integrate(self, t, y, CV_NORMAL)
     }
 
-    pub fn step(&mut self, t: f64, y: &mut V) -> CV {
+    pub fn step(&mut self, t: f64, y: &mut V) -> CVStatus {
         Self::integrate(self, t, y, CV_ONE_STEP)
     }
 
-    fn integrate(&mut self, t: f64, y: &mut V, itask: c_int) -> CV {
+    fn integrate(&mut self, t: f64, y: &mut V, itask: c_int) -> CVStatus {
         // Safety: `yout` does not escape this function and so will
         // not outlive `self.ctx`.
         //let n = y.len();
@@ -329,7 +338,7 @@ where Ctx: Context,
             V::as_mut_ptr(&yout),
             &mut t1, itask) };
         match r {
-            CV_SUCCESS => CV::Ok,
+            CV_SUCCESS => CVStatus::Ok,
             //CV_TSTOP_RETURN => ,
             CV_ROOT_RETURN => {
                 let ret = unsafe { CVodeGetRootInfo(
@@ -338,18 +347,19 @@ where Ctx: Context,
                 debug_assert_eq!(ret, CV_SUCCESS);
                 let z: c_int = 0;
                 let roots = self.rootsfound.iter().map(|g| g != &z).collect();
-                CV::Root(t1, roots)
+                CVStatus::Root(t1, roots)
             }
             CV_MEM_NULL | CV_NO_MALLOC => unreachable!(),
             CV_ILL_INPUT => panic!("CV_ILL_INPUT"),
-            CV_TOO_MUCH_WORK => panic!("Too much work"),
-            CV_TOO_MUCH_ACC => panic!("Could not satisfy desired accuracy"),
-            CV_ERR_FAILURE => CV::ErrFailure,
-            CV_CONV_FAILURE => CV::ConvFailure,
+            CV_TOO_MUCH_WORK => CVStatus::TooMuchWork,
+            CV_TOO_MUCH_ACC => CVStatus::TooMuchAcc,
+            CV_ERR_FAILURE => CVStatus::ErrFailure,
+            CV_CONV_FAILURE => CVStatus::ConvFailure,
             CV_LINIT_FAIL => panic!("CV_LINIT_FAIL"),
             CV_LSETUP_FAIL => panic!("CV_LSETUP_FAIL"),
             CV_LSOLVE_FAIL => panic!("CV_LSOLVE_FAIL"),
             CV_RTFUNC_FAIL => panic!("The root function failed"),
+            CV_TOO_CLOSE => CVStatus::TooClose,
             _ => panic!("sundials::CVode: unexpected return code {}", r),
         }
     }
@@ -361,7 +371,7 @@ where Ctx: Context {
     /// Return the solution at time `t`.
     // FIXME: provide it for any type `V` — which must implement a
     // creation function.
-    pub fn solution(&mut self, t: f64) -> ([f64; N], CV) {
+    pub fn solution(&mut self, t: f64) -> ([f64; N], CVStatus) {
         let mut y = [f64::NAN; N];
         let cv = self.solve(t, &mut y);
         (y, cv)
@@ -372,7 +382,7 @@ where Ctx: Context {
 
 #[cfg(test)]
 mod tests {
-    use crate::{context, cvode::{CVode, CV}};
+    use crate::{context, cvode::{CVode, CVStatus}};
 
     #[test]
     fn cvode_zero_time_step() {
@@ -380,8 +390,8 @@ mod tests {
         let mut ode = CVode::adams(ctx, 0., &[0.],
             |_,_, du| *du = [1.]).unwrap();
         let mut u1 = [f64::NAN];
-        ode.solve(0., &mut u1); // make sure one can use initial time
-        assert_eq!(u1, [0.]);
+        let cv = ode.solve(0., &mut u1);
+        assert_eq!(cv, CVStatus::TooClose);
     }
 
     #[test]
@@ -436,7 +446,7 @@ mod tests {
         let (u, cv) = ode()
             .root(|_, &u, z| *z = [u[0] - 2.])
             .solution(2.);
-        assert!(matches!(cv, CV::Root(_,_)));
+        assert!(matches!(cv, CVStatus::Root(_,_)));
         assert_eq!(u, [2., 3.]);
         assert_eq!(ode().solution(2.).0, [3., 4.]);
     }
@@ -462,7 +472,7 @@ mod tests {
             .root(|_,u, r| *r = [u[0], u[0] - 100.])
             .solve(2., &mut u); // Time is past the root
         match r {
-            CV::Root(t, roots) => {
+            CVStatus::Root(t, roots) => {
                 assert_eq!(roots, vec![true, false]);
                 assert_eq_tol!(t, 1., 1e-12);
                 assert_eq_tol!(u[0], 0., 1e-12);
