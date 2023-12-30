@@ -434,6 +434,16 @@ mod tests {
     }
 
     #[test]
+    fn cvode_nonmonotonic_time() {
+        let ctx = context!().unwrap();
+        let mut ode = CVode::adams(ctx, 0., &[1.],
+            |_, _, du| *du = [1.]).unwrap();
+        let mut u = [f64::NAN];
+        ode.solve(1., &mut u);
+        assert_eq!(ode.solve(0., &mut u), CVStatus::IllInput);
+    }
+
+    #[test]
     fn cvode_move() {
         let ctx = context!().unwrap();
         let init = [0.];
