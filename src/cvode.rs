@@ -201,16 +201,22 @@ where Ctx: Context,
 
 impl<Ctx, V, F, G> CVode<Ctx, V, F, G>
 where V: Vector {
-    pub fn rtol(self, rtol: f64) -> Self {
-        unsafe { CVodeSStolerances(self.cvode_mem.0, rtol, self.atol); }
+    /// Set the relative tolerance.
+    pub fn rtol(mut self, rtol: f64) -> Self {
+        self.rtol = rtol.max(0.);
+        unsafe { CVodeSStolerances(self.cvode_mem.0, self.rtol, self.atol); }
         self
     }
 
-    pub fn atol(self, atol: f64) -> Self {
-        unsafe { CVodeSStolerances(self.cvode_mem.0, self.rtol, atol); }
+    /// Set the absolute tolerance.
+    pub fn atol(mut self, atol: f64) -> Self {
+        self.atol = atol.max(0.);
+        unsafe { CVodeSStolerances(self.cvode_mem.0, self.rtol, self.atol); }
         self
     }
 
+    /// Set the maximum order of the method.  The default is 5 for
+    /// [`CVode::bdf`] and 12 for [`CVode::adams`].
     pub fn maxord(self, o: u8) -> Self {
         unsafe { CVodeSetMaxOrd(self.cvode_mem.0, o as _); }
         self
@@ -319,8 +325,8 @@ pub enum CVStatus {
     /// The initial time `t0` and the output time `t` are too close to
     /// each other and the user did not specify an initial step size.
     TooClose,
-    /// The solver took [`mxstep`] internal steps but could not reach the
-    /// final time.
+    /// The solver took [`CVode::mxsteps`] internal steps but could
+    /// not reach the final time.
     TooMuchWork,
     /// The solver could not satisfy the accuracy demanded by the user
     /// for some internal step.
