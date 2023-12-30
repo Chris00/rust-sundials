@@ -11,10 +11,14 @@ The following code solves the equation ∂ₜu = f(t,u) where f is the
 function (t,u) ↦ 1 using Adams' method.
 
 ```rust
-use sundials::CVode;
-let mut ode = CVode::adams(0., &[0.], |t, u, du| *du = [1.])?;
-let (u1, _) = ode.solution(1.);
-assert_eq!(u1[0], 1.);
+use sundials::{context, cvode::CVode};
+fn main() -> Result<(), Box<sundials::Error>> {
+    let ctx = context!()?;
+    let mut ode = CVode::adams(ctx, 0., &[0.], |t, u, du| *du = [1.])?;
+    let (u1, _) = ode.solution(1.);
+    assert_eq!(u1[0], 1.);
+    Ok(())
+}
 ```
 
 Then `u[0]` contains the solution u at time t=1 and `u[1]` the

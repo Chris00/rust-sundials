@@ -1,6 +1,17 @@
 //! `Cvode` is a solver for stiff and nonstiff ODE systems ẏ = f(t,y)
 //! with root detection and projection on a constraint manifold.
 //! Based on Adams and BDF methods.
+//!
+//! # Example
+//!
+//! ```
+//! use sundials::{context, cvode::CVode};
+//! let ctx = context!()?;
+//! let mut ode = CVode::adams(ctx, 0., &[0.], |t, u, du| *du = [1.])?;
+//! let (u1, _) = ode.solution(1.);
+//! assert_eq!(u1[0], 1.);
+//! # Ok::<(), sundials::Error>(())
+//! ```
 
 use std::{
     ffi::{c_int, c_void, c_long},
@@ -364,7 +375,7 @@ where Ctx: Context {
 
 #[cfg(test)]
 mod tests {
-    use crate::{context, CVode, cvode::CV};
+    use crate::{context, cvode::{CVode, CV}};
 
     #[test]
     fn cvode_zero_time_step() {

@@ -10,7 +10,7 @@
 //! function (t,u) ↦ 1 using Adams' method.
 //!
 //! ```
-//! use sundials::{context, CVode};
+//! use sundials::{context, cvode::CVode};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let ctx = context!()?;
 //! let mut ode = CVode::adams(ctx, 0., &[0.], |t, u, du| *du = [1.])?;
@@ -48,15 +48,13 @@ macro_rules! assert_eq_tol {
 }
 
 mod arkode;
-mod cvode;
+pub mod cvode;
 mod cvodes;
 mod ida;
 mod idas;
 mod kinsol;
 
 mod vector;
-
-pub use cvode::CVode;
 
 ////////////////////////////////////////////////////////////////////////
 //
@@ -315,3 +313,5 @@ impl LinSolver {
     }
 }
 
+#[cfg(doctest)]
+doc_comment::doctest!("../README.md");

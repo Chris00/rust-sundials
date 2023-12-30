@@ -1,4 +1,4 @@
-use sundials::{context, CVode};
+use sundials::{context, cvode::CVode};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ctx = context!().unwrap();
