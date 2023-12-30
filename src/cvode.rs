@@ -315,6 +315,7 @@ pub enum CVStatus {
     /// [`CVode::set_tstop`].
     Tstop(f64),
     Root(f64, Vec<bool>),
+    IllInput,
     /// The initial time `t0` and the output time `t` are too close to
     /// each other and the user did not specify an initial step size.
     TooClose,
@@ -331,14 +332,22 @@ pub enum CVStatus {
 /// # Solving the IVP
 impl<Ctx, V, F, G> CVode<Ctx, V, F, G>
 where Ctx: Context,
-      V: Vector {
-    // FIXME: for arrays, it would be more convenient to return the
-    // array.  For types that are not on the stack (i.e. not Copy),
-    // taking it as an additional parameter is better.
+      V: Vector
+{
+    /// Set `y` to the solution at time `t`.
+    ///
+    /// If this function returns [`CVStatus::IllInput`], it means that
+    /// - `t` was not monotonic w.r.t. previous calls.
+    /// - A component of the error weight vector became zero during
+    ///   internal time-stepping.
+    /// - A root of one of the root functions was found both at a point `t`
+    ///   and also very near `t`.
     pub fn solve(&mut self, t: f64, y: &mut V) -> CVStatus {
         Self::integrate(self, t, y, CV_NORMAL)
     }
 
+    /// Same as [`CVode::solve`] but only perform one time step in the
+    /// direction of `t`.
     pub fn step(&mut self, t: f64, y: &mut V) -> CVStatus {
         Self::integrate(self, t, y, CV_ONE_STEP)
     }
@@ -353,14 +362,6 @@ where Ctx: Context,
                 None => panic!("The context of the output vector y is not \
                     the same as the context of CVode."),
             };
-        // FIXME
-        // if t == self.t0 {
-        //     unsafe { ptr::copy_nonoverlapping(
-        //         N_VGetArrayPointer(V::as_ptr(&self.y0) as *mut _),
-        //         N_VGetArrayPointer(V::as_mut_ptr(&yout)),
-        //         n) };
-        //     return CV::Ok;
-        // }
         let mut tret = self.t0;
         let r = unsafe { CVode(
             self.cvode_mem.0,
@@ -380,7 +381,7 @@ where Ctx: Context,
                 CVStatus::Root(tret, roots)
             }
             CV_MEM_NULL | CV_NO_MALLOC => unreachable!(),
-            CV_ILL_INPUT => panic!("CV_ILL_INPUT"),
+            CV_ILL_INPUT => CVStatus::IllInput,
             CV_TOO_MUCH_WORK => CVStatus::TooMuchWork,
             CV_TOO_MUCH_ACC => CVStatus::TooMuchAcc,
             CV_ERR_FAILURE => CVStatus::ErrFailure,
