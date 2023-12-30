@@ -121,6 +121,14 @@ pub trait Context {
     /// guaranteed by the type system).
     #[inline]
     fn eq(&self, other: &Self) -> bool {
+        // There are two cases when we want to skip this dynamic check.
+        // 1. When the object is auto-converted from Rust (in this
+        //    case using the provided context). See e.g. the train
+        //    `Vector` in `vector` and its implementation for `[f64;N]`.
+        // 2. When the object comes from Sundials (so already has a
+        //    context attached to it) but that context is reflected in
+        //    the type, so the type system already guarantees the
+        //    equality of contexts.  See the macro `context` below.
         self.as_ptr() == other.as_ptr()
     }
 }

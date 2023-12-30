@@ -18,20 +18,26 @@ pub unsafe trait Vector: Clone {
     type NVectorRef<'a>;
     type NVectorMut<'a>;
 
-    /// Convert `self` to a reference to a `N_Vector` reference.
+    /// Convert `self` to a reference to a `N_Vector` reference.  If
+    /// `self` already possesses a [`Context`], this *must* check that
+    /// both contexts are the same and return `None` otherwise.
     ///
     /// # Safety
     /// The return value must not outlive `ctx` (and neither `self` but
     /// this is tracked by the lifetime).
-    unsafe fn to_nvector(&self, ctx: SUNContext) -> Self::NVectorRef<'_>;
+    unsafe fn to_nvector(
+        &self, ctx: SUNContext) -> Option<Self::NVectorRef<'_>>;
 
-    /// Convert `self` to a reference to a mutable `N_Vector` reference.
+    /// Convert `self` to a reference to a mutable `N_Vector`
+    /// reference.  If `self` already possesses a [`Context`], this
+    /// *must* check that both contexts are the same and return `None`
+    /// otherwise.
     ///
     /// # Safety
     /// The return value must not outlive `ctx` (and neither `self` but
     /// this is tracked by the lifetime).
     unsafe fn to_nvector_mut(
-        &mut self, ctx: SUNContext) -> Self::NVectorMut<'_>;
+        &mut self, ctx: SUNContext) -> Option<Self::NVectorMut<'_>>;
 
     /// Cheap projection on a read-only `N_Vector` pointer.
     ///
@@ -98,7 +104,9 @@ unsafe impl<const N: usize> Vector for [f64; N] {
     type NVectorRef<'a> = SharedSerial<&'a [f64; N]>;
 
     #[inline]
-    unsafe fn to_nvector(&self, ctx: SUNContext) -> Self::NVectorRef<'_> {
+    unsafe fn to_nvector(
+        &self, ctx: SUNContext
+    ) -> Option<Self::NVectorRef<'_>> {
         // `N_VMake_Serial` set `content->own_data` to false, so it
         // will not be freed by the drop trait.
         let nv = unsafe {
@@ -106,20 +114,21 @@ unsafe impl<const N: usize> Vector for [f64; N] {
                 N.try_into().unwrap(),
                 self.as_ptr() as *mut _,
                 ctx) };
-        SharedSerial { nv, marker: PhantomData }
+            Some(SharedSerial { nv, marker: PhantomData })
     }
 
     type NVectorMut<'a> = SharedSerial<&'a mut [f64; N]>;
 
     #[inline]
     unsafe fn to_nvector_mut(
-        &mut self, ctx: SUNContext) -> Self::NVectorMut<'_> {
+        &mut self, ctx: SUNContext
+    ) -> Option<Self::NVectorMut<'_>> {
         let nv = unsafe {
             N_VMake_Serial(
                 N.try_into().unwrap(),
                 self.as_mut_ptr(),
                 ctx) };
-            SharedSerial { nv, marker: PhantomData }
+            Some(SharedSerial { nv, marker: PhantomData })
     }
 
     #[inline]
@@ -182,13 +191,15 @@ where V: AsVector {
     type NVectorRef<'a> = SharedSerial<&'a V>;
 
     #[inline]
-    unsafe fn to_nvector(&self, ctx: SUNContext) -> Self::NVectorRef<'_> {
+    unsafe fn to_nvector(
+        &self, ctx: SUNContext
+    ) -> Option<Self::NVectorRef<'_>> {
         let nv = unsafe {
             N_VMake_Serial(
                 self.len().try_into().unwrap(),
                 self.as_ref().as_ptr() as *mut _,
                 ctx) };
-        SharedSerial { nv, marker: PhantomData }
+        Some(SharedSerial { nv, marker: PhantomData })
     }
 
     type NVectorMut<'a> = SharedSerial<&'a mut V>;
@@ -196,13 +207,13 @@ where V: AsVector {
     #[inline]
     unsafe fn to_nvector_mut(
         &mut self, ctx: SUNContext
-    ) -> Self::NVectorMut<'_> {
+    ) -> Option<Self::NVectorMut<'_>> {
         let nv = unsafe {
             N_VMake_Serial(
                 self.len().try_into().unwrap(),
                 self.as_mut().as_ptr() as *mut _,
                 ctx) };
-        SharedSerial { nv, marker: PhantomData }
+        Some(SharedSerial { nv, marker: PhantomData })
     }
 
     #[inline]

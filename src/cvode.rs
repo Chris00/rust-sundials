@@ -145,7 +145,12 @@ where Ctx: Context,
         let n = y0.len();
         // SAFETY: Once `y0` has been passed to `CVodeInit`, it is
         // copied to internal structures and thus can be freed.
-        let y0 = unsafe { y0.to_nvector(ctx.as_ptr()) };
+        let y0 =
+            match unsafe { y0.to_nvector(ctx.as_ptr()) } {
+                Some(y0) => y0,
+                None => panic!("The context of y0 is not the same as the \
+                    context of the CVode solver."),
+            };
         let r = unsafe { CVodeInit(
             cvode_mem.0,
             Some(Self::cvrhs),
@@ -322,7 +327,12 @@ where Ctx: Context,
         // Safety: `yout` does not escape this function and so will
         // not outlive `self.ctx`.
         //let n = y.len();
-        let yout = unsafe { V::to_nvector_mut(y, self.ctx.as_ptr()) };
+        let yout =
+            match unsafe { V::to_nvector_mut(y, self.ctx.as_ptr()) }{
+                Some(yout) => yout,
+                None => panic!("The context of the output vector y is not \
+                    the same as the context of CVode."),
+            };
         // FIXME
         // if t == self.t0 {
         //     unsafe { ptr::copy_nonoverlapping(
