@@ -1,42 +1,40 @@
 //! Vectors
 
-use std::{mem, slice, marker::PhantomData};
+use std::{mem, marker::PhantomData};
 use sundials_sys::*;
 use super::Context;
+
+pub mod custom;
 
 /// Trait implemented by types that are considered vectors by this
 /// library.
 pub unsafe trait Vector: Clone {
-    /// Rust view to a `N_Vector` owned by Sundials.
-    type View<'a>;
-    type ViewMut<'a>;
+    fn from_nvector<'a>(nv: N_Vector) -> &'a Self;
+    fn from_nvector_mut<'a>(nv: N_Vector) -> &'a mut Self;
 
-    fn from_nvector<'a>(nv: N_Vector) -> Self::View<'a>;
-    fn from_nvector_mut<'a>(nv: N_Vector) -> Self::ViewMut<'a>;
-
-    /// Reference to a N_Vector.
+    /// Wrapper of a N_Vector borrowing `self`.
     type NVectorRef<'a>;
+    /// Wrapper of a N_Vector mutably borrowing `self`.
     type NVectorMut<'a>;
 
-    /// Convert `self` to a reference to a `N_Vector` reference.  If
+    /// Return a wrapper of a `N_Vector` that references `self`.  If
     /// `self` already possesses a [`Context`], this *must* check that
     /// both contexts are the same and return `None` otherwise.
     ///
     /// # Safety
     /// The return value must not outlive `ctx` (and neither `self` but
     /// this is tracked by the lifetime).
-    unsafe fn to_nvector(
+    unsafe fn as_nvector(
         &self, ctx: SUNContext) -> Option<Self::NVectorRef<'_>>;
 
-    /// Convert `self` to a reference to a mutable `N_Vector`
-    /// reference.  If `self` already possesses a [`Context`], this
-    /// *must* check that both contexts are the same and return `None`
-    /// otherwise.
+    /// Return a wrapper of a `N_Vector` that can mutate `self`.  If
+    /// `self` already possesses a [`Context`], this *must* check that
+    /// both contexts are the same and return `None` otherwise.
     ///
     /// # Safety
     /// The return value must not outlive `ctx` (and neither `self` but
     /// this is tracked by the lifetime).
-    unsafe fn to_nvector_mut(
+    unsafe fn as_mut_nvector(
         &mut self, ctx: SUNContext) -> Option<Self::NVectorMut<'_>>;
 
     /// Cheap projection on a read-only `N_Vector` pointer.
@@ -75,7 +73,7 @@ impl<V> Drop for SharedSerial<V> {
 }
 
 unsafe impl<const N: usize> Vector for [f64; N] {
-    type View<'a> = &'a [f64; N];
+    //type View<'a> = &'a [f64; N];
 
     #[inline]
     fn from_nvector<'a>(nv: N_Vector) -> &'a Self {
@@ -89,7 +87,7 @@ unsafe impl<const N: usize> Vector for [f64; N] {
         }
     }
 
-    type ViewMut<'a> = &'a mut [f64; N];
+    //type ViewMut<'a> = &'a mut [f64; N];
 
     #[inline]
     fn from_nvector_mut<'a>(nv: N_Vector) -> &'a mut Self {
@@ -104,7 +102,7 @@ unsafe impl<const N: usize> Vector for [f64; N] {
     type NVectorRef<'a> = SharedSerial<&'a [f64; N]>;
 
     #[inline]
-    unsafe fn to_nvector(
+    unsafe fn as_nvector(
         &self, ctx: SUNContext
     ) -> Option<Self::NVectorRef<'_>> {
         // `N_VMake_Serial` set `content->own_data` to false, so it
@@ -120,7 +118,7 @@ unsafe impl<const N: usize> Vector for [f64; N] {
     type NVectorMut<'a> = SharedSerial<&'a mut [f64; N]>;
 
     #[inline]
-    unsafe fn to_nvector_mut(
+    unsafe fn as_mut_nvector(
         &mut self, ctx: SUNContext
     ) -> Option<Self::NVectorMut<'_>> {
         let nv = unsafe {
@@ -160,38 +158,40 @@ where V: AsVector {
     // It is not possible to reconstruct `V` (e.g. `Vec<f64>`) from
     // `N_Vector` because we do not own the `N_Vector` that Sundials
     // gives us.  Also it was likely provided by a different allocator.
-    type View<'a> = &'a [f64];
+    // type View<'a> = &'a [f64];
 
     #[inline]
-    fn from_nvector<'a>(nv: N_Vector) -> &'a [f64] {
+    fn from_nvector<'a>(nv: N_Vector) -> &'a V {
         unsafe {
             let ptr = N_VGetArrayPointer_Serial(nv);
             // Check alignment requirements of `std::slice::from_raw_parts`.
             debug_assert_eq!(0,
                 (ptr as usize).rem_euclid(mem::align_of::<f64>()));
             let n = N_VGetLength_Serial(nv);
-            slice::from_raw_parts(ptr, n as _)
+            todo!();
+            //slice::from_raw_parts(ptr, n as _)
         }
     }
 
-    type ViewMut<'a> = &'a mut [f64];
+    // type ViewMut<'a> = &'a mut [f64];
 
     #[inline]
-    fn from_nvector_mut<'a>(nv: N_Vector) -> &'a mut [f64] {
+    fn from_nvector_mut<'a>(nv: N_Vector) -> &'a mut V {
         unsafe {
             let ptr = N_VGetArrayPointer_Serial(nv);
             // Check alignment requirements of `slice::from_raw_parts_mut`.
             debug_assert_eq!(0,
                 (ptr as usize).rem_euclid(mem::align_of::<f64>()));
             let n = N_VGetLength_Serial(nv);
-            slice::from_raw_parts_mut(ptr, n as _)
+            todo!();
+            //slice::from_raw_parts_mut(ptr, n as _)
         }
     }
 
     type NVectorRef<'a> = SharedSerial<&'a V>;
 
     #[inline]
-    unsafe fn to_nvector(
+    unsafe fn as_nvector(
         &self, ctx: SUNContext
     ) -> Option<Self::NVectorRef<'_>> {
         let nv = unsafe {
@@ -205,7 +205,7 @@ where V: AsVector {
     type NVectorMut<'a> = SharedSerial<&'a mut V>;
 
     #[inline]
-    unsafe fn to_nvector_mut(
+    unsafe fn as_mut_nvector(
         &mut self, ctx: SUNContext
     ) -> Option<Self::NVectorMut<'_>> {
         let nv = unsafe {
