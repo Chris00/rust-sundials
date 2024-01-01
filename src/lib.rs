@@ -14,7 +14,7 @@
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let ctx = context!()?;
 //! let mut ode = CVode::adams(ctx, 0., &[0.], |t, u, du| *du = [1.])?;
-//! let (u1, _) = ode.solution(1.);
+//! let (u1, _) = ode.solution(0., &[0.], 1.);
 //! assert_eq!(u1[0], 1.);
 //! # Ok(()) }
 //! ```
@@ -281,7 +281,7 @@ impl Drop for Matrix {
 }
 
 impl Matrix {
-    fn new(
+    fn dense(
         name: &'static str, ctx: &impl Context, m: usize, n: usize,
     ) -> Result<Self, Error> {
         let mat = unsafe {
@@ -308,11 +308,12 @@ impl LinSolver {
     ///
     /// # Safety
     /// The return value must not outlive `ctx`.
-    unsafe fn new(
-        name: &'static str, ctx: SUNContext, vec: N_Vector, mat: &Matrix,
+    unsafe fn spgmr(
+        name: &'static str, ctx: SUNContext,
+        vec: N_Vector,
     ) -> Result<Self, Error> {
         let linsolver = unsafe {
-            SUNLinSol_Dense(vec, mat.0, ctx) };
+            SUNLinSol_SPGMR(vec, SUN_PREC_NONE as _, 30, ctx) };
         if linsolver.is_null() {
             Err(Error::Fail{ name, msg: "linear solver  allocation failed"})
         } else {

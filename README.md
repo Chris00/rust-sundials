@@ -15,7 +15,7 @@ use sundials::{context, cvode::CVode};
 fn main() -> Result<(), Box<sundials::Error>> {
     let ctx = context!()?;
     let mut ode = CVode::adams(ctx, 0., &[0.], |t, u, du| *du = [1.])?;
-    let (u1, _) = ode.solution(1.);
+    let (u1, _) = ode.solution(0., &[0.], 1.);
     assert_eq!(u1[0], 1.);
     Ok(())
 }
