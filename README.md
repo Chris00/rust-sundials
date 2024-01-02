@@ -14,9 +14,12 @@ function (t,u) ↦ 1 using Adams' method.
 use sundials::{context, cvode::CVode};
 fn main() -> Result<(), Box<sundials::Error>> {
     let ctx = context!()?;
-    let mut ode = CVode::adams(ctx, 0., &[0.], |t, u, du| *du = [1.])?;
-    let (u1, _) = ode.solution(0., &[0.], 1.);
-    assert_eq!(u1[0], 1.);
+    let mut ode = CVode::adams(ctx, 0., &[0.], |t, u, du| *du = [1.]).build()?;
+	let mut u1 = [f64::NAN];
+	ode.solve(2., &mut u1);
+	assert_eq!(u1, [2.]);
+    let (u2, _) = ode.cauchy(0., &[0.], 1.);
+    assert_eq!(u2[0], 1.);
     Ok(())
 }
 ```

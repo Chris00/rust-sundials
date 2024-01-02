@@ -7,13 +7,14 @@
 //! ```
 //! use sundials::{context, cvode::CVode};
 //! let ctx = context!()?;
-//! let mut ode = CVode::adams(ctx, 0., &[0.], |t, u, du| *du = [1.])?;
-//! let (u1, _) = ode.solution(0., &[0.], 1.);
+//! let mut ode = CVode::adams(ctx, 0., &[0.], |t, u, du| *du = [1.]).build()?;
+//! let (u1, _) = ode.cauchy(0., &[0.], 1.);
 //! assert_eq!(u1[0], 1.);
 //! # Ok::<(), sundials::Error>(())
 //! ```
 
 use std::{
+    borrow::Borrow,
     ffi::{c_int, c_void, c_long},
     marker::PhantomData, ptr,
 };
@@ -26,6 +27,220 @@ use super::{
     LinSolver
 };
 
+/// Configuration of a CVode solver.
+pub struct CVodeConf<'a, Ctx, V, F, G>
+where V: Vector {
+    ctx: Ctx,
+    name: &'static str,
+    lmm: c_int,
+    t0: f64,
+    y0: &'a V,
+    f: F,
+    g: G,
+    rtol: f64,
+    atol: f64,
+    tstop: Option<f64>,
+    maxord: Option<u8>,
+    mxsteps: Option<i64>,
+    max_hnil_warns: i32,
+}
+
+impl<'a, Ctx, V, F, G> CVodeConf<'a, Ctx, V, F, G>
+where
+    Ctx: Context,
+    V: Vector,
+    F: FnMut(f64, &V, &mut V),
+{
+    fn new(
+        ctx: Ctx, name: &'static str, lmm: c_int,
+        t0: f64, y0: &'a V, f: F, g: G,
+    ) -> Self {
+        Self {
+            ctx, name, lmm,
+            t0, y0,
+            f, g,
+            rtol: 1e-6,
+            atol: 1e-12,
+            tstop: None,
+            maxord: None,
+            mxsteps: None,
+            // https://sundials.readthedocs.io/en/latest/cvode/Usage/index.html#c.CVodeSetMaxHnilWarns
+            max_hnil_warns: 10, // Default
+        }
+    }
+
+    /// Return a reference to the [`Context`] the CVode configuration
+    /// was built with.
+    pub fn context(&self) -> &Ctx {
+        &self.ctx
+    }
+
+    /// Consumes CVode configuration and return the [`Context`] it was
+    /// built with.
+    pub fn into_context(self) -> Ctx {
+        self.ctx
+    }
+
+        /// Set the relative tolerance.
+    pub fn rtol(mut self, rtol: f64) -> Self {
+        self.rtol = rtol.max(0.);
+        self
+    }
+
+    /// Set the absolute tolerance.
+    pub fn atol(mut self, atol: f64) -> Self {
+        self.atol = atol.max(0.);
+        self
+    }
+
+    /// Set the maximum order of the method.  The default is 5 for
+    /// [`CVode::bdf`] and 12 for [`CVode::adams`].
+    pub fn maxord(mut self, o: u8) -> Self {
+        self.maxord = Some(o);
+        self
+    }
+
+    /// Specify the maximum number of steps to be taken by the solver
+    /// in its attempt to reach the next output time.  Default: 500.
+    // FIXME: make sure "mxstep steps taken before reaching tout" does
+    // not abort the program.
+    pub fn mxsteps(mut self, n: usize) -> Self {
+        let n =
+            if n <= c_long::MAX as usize { n as _ } else { c_long::MAX };
+        self.mxsteps = Some(n);
+        self
+    }
+
+    /// Specifies the value `tstop` of the independent variable t past
+    /// which the solution is not to proceed.  Return `false` if
+    /// `tstop` is not beyond the current t value.
+    // Using [`f64::NAN`] disables the stop time.
+    // (Requires version 6.5.1)
+    pub fn set_tstop(mut self, tstop: f64) -> Self {
+        self.tstop = Some(tstop);
+        self
+    }
+
+    /// Specifies the maximum number of messages issued by the solver
+    /// warning that t + h = t on the next internal step.
+    pub fn max_hnil_warns(mut self, n: i32) -> Self {
+        self.max_hnil_warns = n;
+        self
+    }
+
+    /// Build the ODE solver.
+    pub fn build(self) -> Result<CVode<Ctx, V, F, G>, super::Error> {
+        // All configuration errors are reported by this function,
+        // which is easier for the user.
+        let cvode_mem = unsafe {
+            CVodeMem(CVodeCreate(self.lmm, self.ctx.as_ptr())) };
+        if cvode_mem.0.is_null() {
+            return Err(Error::Failure{
+                name: self.name,
+                msg: "Allocation of the ODE structure failed." })
+        }
+        // let n = V::len(y0);
+        // SAFETY: Once `y0` has been passed to `CVodeInit`, it is
+        // copied to internal structures and thus can be freed.
+        let y0 = self.y0.borrow();
+        let y0 =
+            match unsafe { V::as_nvector(y0, self.ctx.as_ptr()) } {
+                Some(y0) => y0,
+                None => panic!("The context of y0 is not the same as the \
+                    context of the CVode solver."),
+            };
+        let r = unsafe { CVodeInit(
+            cvode_mem.0,
+            Some(Self::cvrhs),
+            self.t0,
+            V::as_ptr(&y0) as *mut _) };
+        if r == CV_MEM_FAIL {
+            let msg = "a memory allocation request has failed";
+            return Err(Error::Failure{name: self.name, msg})
+        }
+        if r == CV_ILL_INPUT {
+            let msg = "An input argument has an illegal value";
+            return Err(Error::Failure{name: self.name, msg})
+        }
+        // Set default tolerances (otherwise the solver will complain).
+        unsafe { CVodeSStolerances(
+            cvode_mem.0, self.rtol, self.atol); }
+        // Set the default linear solver to one that does not require
+        // the `…nvgetarraypointer` on vectors (FIXME: configurable)
+        let linsolver = unsafe { LinSolver::spgmr(
+            self.name,
+            self.ctx.as_ptr(),
+            V::as_ptr(&y0) as *mut _)? };
+        let r = unsafe { CVodeSetLinearSolver(
+            cvode_mem.0, linsolver.0, ptr::null_mut()) };
+        if r != CVLS_SUCCESS as i32 {
+            return Err(Error::Failure {
+                name: self.name,
+                msg: "could not attach linear solver"
+            })
+        }
+        unsafe { CVodeSStolerances(
+            cvode_mem.0, self.rtol, self.atol); }
+        if let Some(maxord) = self.maxord {
+            unsafe { CVodeSetMaxOrd(
+                cvode_mem.0,
+                maxord as _); }
+        }
+        if let Some(mxsteps) = self.mxsteps {
+            unsafe { CVodeSetMaxNumSteps(
+                cvode_mem.0,
+                mxsteps) };
+        }
+        if let Some(tstop) = self.tstop {
+            if tstop.is_nan() {
+                // unsafe { CVodeClearStopTime(self.cvode_mem.0); }
+                ()
+            } else {
+                let ret = unsafe { CVodeSetStopTime(
+                    cvode_mem.0,
+                    tstop) };
+                if ret == CV_ILL_INPUT {
+                    // FIXME: should not happen in this configuration
+                    // as it is fixed ahead of execution.
+                    let msg = "The 'tstop' time is not is not beyond \
+                        the current time value.";
+                    return Err(Error::Failure { name: self.name, msg });
+                }
+            }
+        }
+        unsafe { CVodeSetMaxHnilWarns(cvode_mem.0, self.max_hnil_warns) };
+        Ok(CVode {
+            ctx: self.ctx,  cvode_mem,
+            t0: self.t0,  vec: PhantomData,
+            rtol: self.rtol,  atol: self.atol,
+            matrix: None,  linsolver: Some(linsolver),
+            rootsfound: vec![],
+            user_data: UserData { f: self.f, g: self.g }
+        })
+    }
+
+    /// Callback for the right-hand side of the equation.
+    extern "C" fn cvrhs(t: f64, nvy: N_Vector, nvdy: N_Vector,
+                        user_data: *mut c_void
+    ) -> c_int {
+        // Protect against unwinding in C code.
+        match std::panic::catch_unwind(|| {
+            // Get f from user_data, whatever the type of g.
+            let y = V::from_nvector(nvy);
+            let dy = V::from_nvector_mut(nvdy);
+            let u = unsafe { &mut *(user_data as *mut UserData<F, ()>) };
+            (u.f)(t, y, dy);
+        }) {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("sundials::CVode: right-hand side function \
+                           panicked: {:?}", e);
+                std::process::abort() // Doesn't unwind
+            }
+        }
+    }
+}
+
 // Implement the Drop trait only on the pointer to be able to move
 // values out of the structure `CVode`.
 #[derive(Debug)]
@@ -33,6 +248,28 @@ struct CVodeMem(*mut c_void);
 
 impl Drop for CVodeMem {
     fn drop(&mut self) { unsafe { CVodeFree(&mut self.0) } }
+}
+
+/// Return value of [`CVode::solve`] and [`CVode::step`].
+#[derive(Debug, PartialEq)]
+pub enum CVStatus {
+    Ok,
+    /// Succeeded by reaching the stopping point specified through
+    /// [`CVode::set_tstop`].
+    Tstop(f64),
+    Root(f64, Vec<bool>),
+    IllInput,
+    /// The initial time `t0` and the output time `t` are too close to
+    /// each other and the user did not specify an initial step size.
+    TooClose,
+    /// The solver took [`CVode::mxsteps`] internal steps but could
+    /// not reach the final time.
+    TooMuchWork,
+    /// The solver could not satisfy the accuracy demanded by the user
+    /// for some internal step.
+    TooMuchAcc,
+    ErrFailure,
+    ConvFailure,
 }
 
 /// Solver for stiff and nonstiff initial value problems for ODE systems.
@@ -68,9 +305,36 @@ struct UserData<F, G> {
     g: G, // Function whose roots we want to compute (if any)
 }
 
+impl<Ctx, V, F> CVode<Ctx, V, F, ()>
+where Ctx: Context,
+      V: Vector + Sized,
+      F: FnMut(f64, &V, &mut V)
+{
+    /// Solver using the Adams linear multistep method.  Recommended
+    /// for non-stiff problems.
+    // The fixed-point solver is recommended for nonstiff problems.
+    pub fn adams<'a>(
+        ctx: Ctx, t0: f64, y0: &'a V, f: F
+    ) -> CVodeConf<'a, Ctx, V, F, ()> {
+        CVodeConf::new(
+            ctx,"CVode::adams", CV_ADAMS, t0, y0, f, ())
+    }
+
+    /// Solver using the BDF linear multistep method.  Recommended for
+    /// stiff problems.
+    // The default Newton iteration is recommended for stiff problems,
+    pub fn bdf<'a>(
+        ctx: Ctx, t0: f64, y0: &'a V, f: F
+    ) -> CVodeConf<'a, Ctx, V, F, ()> {
+        CVodeConf::new(
+            ctx, "CVode::bdf", CV_BDF, t0, y0, f, ())
+    }
+}
+
 impl<Ctx, V, F, G> CVode<Ctx, V, F, G>
 where Ctx: Context,
-      V: Vector
+      V: Vector + Sized,
+      F: FnMut(f64, &V, &mut V)
 {
     /// Return a reference to the [`Context`] the CVode solver was
     /// built with.
@@ -93,174 +357,7 @@ where Ctx: Context,
             ptr as *mut c_void) };
         debug_assert_eq!(ret, 0);
     }
-}
 
-impl<Ctx, V, F> CVode<Ctx, V, F, ()>
-where Ctx: Context,
-      V: Vector + Sized,
-      F: FnMut(f64, &V, &mut V)
-{
-    /// Callback for the right-hand side of the equation.
-    extern "C" fn cvrhs(t: f64, nvy: N_Vector, nvdy: N_Vector,
-                        user_data: *mut c_void
-    ) -> c_int {
-        // Protect against unwinding in C code.
-        match std::panic::catch_unwind(|| {
-            // Get f from user_data, whatever the type of g.
-            let y = V::from_nvector(nvy);
-            let dy = V::from_nvector_mut(nvdy);
-            let u = unsafe { &mut *(user_data as *mut UserData<F, ()>) };
-            (u.f)(t, y, dy);
-        }) {
-            Ok(()) => 0,
-            Err(e) => {
-                eprintln!("sundials::CVode: right-hand side function \
-                           panicked: {:?}", e);
-                std::process::abort() // Doesn't unwind
-            }
-        }
-    }
-
-    /// Initialize a CVode with method `llm`.
-    fn init(
-        name: &'static str, lmm: c_int,
-        // Take the context by move so only one solver can have it at
-        // a given time.
-        ctx: Ctx, t0: f64, y0: &V, f: F
-    ) -> Result<Self, Error> {
-        let cvode_mem = unsafe {
-            CVodeMem(CVodeCreate(lmm, ctx.as_ptr())) };
-        if cvode_mem.0.is_null() {
-            return Err(Error::Failure{name, msg: "Allocation failed"})
-        }
-        // let n = V::len(y0);
-        // SAFETY: Once `y0` has been passed to `CVodeInit`, it is
-        // copied to internal structures and thus can be freed.
-        let y0 =
-            match unsafe { V::as_nvector(y0, ctx.as_ptr()) } {
-                Some(y0) => y0,
-                None => panic!("The context of y0 is not the same as the \
-                    context of the CVode solver."),
-            };
-        let r = unsafe { CVodeInit(
-            cvode_mem.0,
-            Some(Self::cvrhs),
-            t0,
-            V::as_ptr(&y0) as *mut _) };
-        if r == CV_MEM_FAIL {
-            let msg = "a memory allocation request has failed";
-            return Err(Error::Failure{name, msg})
-        }
-        if r == CV_ILL_INPUT {
-            let msg = "An input argument has an illegal value";
-            return Err(Error::Failure{name, msg})
-        }
-        let rtol = 1e-6;
-        let atol = 1e-12;
-        // Set default tolerances (otherwise the solver will complain).
-        unsafe { CVodeSStolerances(
-            cvode_mem.0, rtol, atol); }
-        // Set the default linear solver to one that does not require
-        // the `…nvgetarraypointer` on vectors (FIXME: configurable)
-        let linsolver = unsafe { LinSolver::spgmr(
-            name, ctx.as_ptr(), V::as_ptr(&y0) as *mut _)? };
-        let r = unsafe { CVodeSetLinearSolver(
-            cvode_mem.0, linsolver.0, ptr::null_mut()) };
-        if r != CVLS_SUCCESS as i32 {
-            return Err(Error::Failure {
-                name,
-                msg: "could not attach linear solver"
-            })
-        }
-        Ok(Self {
-            ctx, cvode_mem,
-            t0, vec: PhantomData,
-            rtol, atol, matrix: None, linsolver: Some(linsolver),
-            rootsfound: vec![],
-            user_data: UserData { f, g: () }
-        })
-    }
-
-    /// Solver using the Adams linear multistep method.  Recommended
-    /// for non-stiff problems.
-    // The fixed-point solver is recommended for nonstiff problems.
-    pub fn adams(ctx: Ctx, t0: f64, y0: &V, f: F) -> Result<Self, Error> {
-        Self::init("CVode::adams", CV_ADAMS, ctx, t0, y0, f)
-    }
-
-    /// Solver using the BDF linear multistep method.  Recommended for
-    /// stiff problems.
-    // The default Newton iteration is recommended for stiff problems,
-    pub fn bdf(ctx: Ctx, t0: f64, y0: &V, f: F) -> Result<Self, Error> {
-        Self::init("CVode::bdf", CV_BDF, ctx, t0, y0, f)
-    }
-}
-
-impl<Ctx, V, F, G> CVode<Ctx, V, F, G>
-where V: Vector {
-    /// Set the relative tolerance.
-    pub fn rtol(mut self, rtol: f64) -> Self {
-        self.rtol = rtol.max(0.);
-        unsafe { CVodeSStolerances(self.cvode_mem.0, self.rtol, self.atol); }
-        self
-    }
-
-    /// Set the absolute tolerance.
-    pub fn atol(mut self, atol: f64) -> Self {
-        self.atol = atol.max(0.);
-        unsafe { CVodeSStolerances(self.cvode_mem.0, self.rtol, self.atol); }
-        self
-    }
-
-    /// Set the maximum order of the method.  The default is 5 for
-    /// [`CVode::bdf`] and 12 for [`CVode::adams`].
-    pub fn maxord(self, o: u8) -> Self {
-        unsafe { CVodeSetMaxOrd(self.cvode_mem.0, o as _); }
-        self
-    }
-
-    /// Specify the maximum number of steps to be taken by the solver
-    /// in its attempt to reach the next output time.  Default: 500.
-    // FIXME: make sure "mxstep steps taken before reaching tout" does
-    // not abort the program.
-    pub fn mxsteps(self, n: usize) -> Self {
-        let n =
-            if n <= c_long::MAX as usize { n as _ } else { c_long::MAX };
-        unsafe { CVodeSetMaxNumSteps(self.cvode_mem.0, n) };
-        self
-    }
-
-    /// Specifies the value `tstop` of the independent variable t past
-    /// which the solution is not to proceed.  Return `false` if
-    /// `tstop` is not beyond the current t value.
-    // Using [`f64::NAN`] disables the stop time.
-    // (Requires version 6.5.1)
-    pub fn set_tstop(&mut self, tstop: f64) -> bool {
-        if tstop.is_nan() {
-            // unsafe { CVodeClearStopTime(self.cvode_mem.0); }
-            true
-        } else {
-            let ret = unsafe { CVodeSetStopTime(
-                self.cvode_mem.0,
-                tstop) };
-            ret == CV_ILL_INPUT
-        }
-    }
-
-    /// Specifies the maximum number of messages issued by the solver
-    /// warning that t + h = t on the next internal step.
-    pub fn max_hnil_warns(self, n: usize) -> Self {
-        unsafe { CVodeSetMaxHnilWarns(self.cvode_mem.0, n as _) };
-        self
-    }
-}
-
-/// # Root-finding capabilities
-impl<Ctx, V, F, G> CVode<Ctx, V, F, G>
-where Ctx: Context,
-      V: Vector,
-      F: FnMut(f64, &V, &mut V),
-{
     /// Callback for the root-finding callback for `N` functions,
     /// where `N` is known at compile time.
     extern "C" fn cvroot1<const N: usize, G1>(
@@ -310,36 +407,8 @@ where Ctx: Context,
             user_data: UserData { f: self.user_data.f, g },
         }
     }
-}
 
 
-/// Return value of [`CVode::solve`] and [`CVode::step`].
-#[derive(Debug, PartialEq)]
-pub enum CVStatus {
-    Ok,
-    /// Succeeded by reaching the stopping point specified through
-    /// [`CVode::set_tstop`].
-    Tstop(f64),
-    Root(f64, Vec<bool>),
-    IllInput,
-    /// The initial time `t0` and the output time `t` are too close to
-    /// each other and the user did not specify an initial step size.
-    TooClose,
-    /// The solver took [`CVode::mxsteps`] internal steps but could
-    /// not reach the final time.
-    TooMuchWork,
-    /// The solver could not satisfy the accuracy demanded by the user
-    /// for some internal step.
-    TooMuchAcc,
-    ErrFailure,
-    ConvFailure,
-}
-
-/// # Solving the IVP
-impl<Ctx, V, F, G> CVode<Ctx, V, F, G>
-where Ctx: Context,
-      V: Vector
-{
     /// Set `y` to the solution at time `t`.
     ///
     /// If this function returns [`CVStatus::IllInput`], it means that
@@ -417,15 +486,10 @@ where Ctx: Context,
         (tret, status)
     }
 
-}
-
-impl<Ctx, V, F, G> CVode<Ctx, V, F, G>
-where Ctx: Context,
-      V: Vector
-{
     /// Return the solution with initial conditions (`t0`, `y0`) at
     /// time `t`.  This is a convenience function.
-    pub fn solution(&mut self, t0: f64, y0: &V, t: f64) -> (V, CVStatus) {
+    pub fn cauchy(&mut self, t0: f64, y0: &V, t: f64) -> (V, CVStatus) {
+        // FIXME: should we check the dim of `y0`?
         let mut y = y0.clone();
         // Avoid CVStatus::TooClose
         if t == t0 {
@@ -459,7 +523,7 @@ mod tests {
     fn cvode_zero_time_step() {
         let ctx = context!(P0).unwrap();
         let mut ode = CVode::adams(ctx, 0., &[0.],
-            |_,_, du| *du = [1.]).unwrap();
+            |_,_, du| *du = [1.]).build().unwrap();
         let mut u1 = [f64::NAN];
         let cv = ode.solve(0., &mut u1);
         assert_eq!(cv, CVStatus::TooClose);
@@ -469,15 +533,15 @@ mod tests {
     fn cvode_solution() {
         let ctx = context!().unwrap();
         let mut ode = CVode::adams(ctx, 0., &[0.],
-            |_,_, du| *du = [1.]).unwrap();
-        assert_eq!(ode.solution(0., &[0.], 1.).0, [1.]);
+            |_,_, du| *du = [1.]).build().unwrap();
+        assert_eq!(ode.cauchy(0., &[0.], 1.).0, [1.]);
     }
 
     #[test]
     fn cvode_exp() {
         let ctx = context!().unwrap();
         let mut ode = CVode::adams(ctx, 0., &[1.],
-            |_,u, du| *du = *u).unwrap();
+            |_,u, du| *du = *u).build().unwrap();
         let mut u1 = [f64::NAN];
         ode.solve(1., &mut u1);
         assert_eq_tol!(u1[0], 1f64.exp(), 1e-5);
@@ -486,11 +550,12 @@ mod tests {
     #[test]
     fn cvode_sin() {
         let ctx = context!().unwrap();
-        let ode = CVode::adams(ctx, 0., &[0., 1.], |_, u, du: &mut [_;2]| {
+        let mut ode = CVode::adams(ctx, 0., &[0., 1.], |_, u, du| {
             *du = [u[1], -u[0]]
-        }).unwrap();
+        })
+            .mxsteps(500).build().unwrap();
         let mut u1 = [f64::NAN, f64::NAN];
-        ode.mxsteps(500).solve(1., &mut u1);
+        ode.solve(1., &mut u1);
         assert_eq_tol!(u1[0], 1f64.sin(), 1e-5);
     }
 
@@ -498,7 +563,7 @@ mod tests {
     fn cvode_nonmonotonic_time() {
         let ctx = context!().unwrap();
         let mut ode = CVode::adams(ctx, 0., &[1.],
-            |_, _, du| *du = [1.]).unwrap();
+            |_, _, du| *du = [1.]).build().unwrap();
         let mut u = [f64::NAN];
         ode.solve(1., &mut u);
         assert_eq!(ode.solve(0., &mut u), CVStatus::IllInput);
@@ -509,9 +574,10 @@ mod tests {
         let ctx = context!().unwrap();
         let init = [0.];
         let ode = move || {
-            CVode::adams(ctx, 0., &init, |_,_, du| *du = [1.]).unwrap()
+            CVode::adams(ctx, 0., &init, |_,_, du| *du = [1.])
+                .build().unwrap()
         };
-        assert_eq!(ode().solution(0., &init, 1.).0, [1.]);
+        assert_eq!(ode().cauchy(0., &init, 1.).0, [1.]);
     }
 
     #[test]
@@ -521,15 +587,15 @@ mod tests {
             let ctx = context!().unwrap();
             CVode::adams(ctx, 0., &init, |_,_, du: &mut [_;2]| {
                 *du = [1., 1.]
-            }).unwrap()
+            }).build().unwrap()
         };
-        assert_eq!(ode().solution(0., &init, 1.).0, [2., 3.]);
+        assert_eq!(ode().cauchy(0., &init, 1.).0, [2., 3.]);
         let (u, cv) = ode()
             .root(|_, &u, z| *z = [u[0] - 2.])
-            .solution(0., &init, 2.);
+            .cauchy(0., &init, 2.);
         assert!(matches!(cv, CVStatus::Root(_,_)));
         assert_eq!(u, [2., 3.]);
-        assert_eq!(ode().solution(0., &init, 2.).0, [3., 4.]);
+        assert_eq!(ode().cauchy(0., &init, 2.).0, [3., 4.]);
     }
 
     #[test]
@@ -537,7 +603,7 @@ mod tests {
         let ctx = context!().unwrap();
         let c = 1.;
         let mut ode = CVode::adams(ctx, 0., &[0.],
-                                   |_,_, du| *du = [c]).unwrap();
+                                   |_,_, du| *du = [c]).build().unwrap();
         let mut u1 = [f64::NAN];
         ode.solve(1., &mut u1);
         assert_eq_tol!(u1[0], c, 1e-5);
@@ -549,7 +615,7 @@ mod tests {
         let mut u = [f64::NAN; 2];
         let r = CVode::adams(ctx, 0., &[0., 1.],  |_, u, du: &mut [_;2]| {
             *du = [u[1], -2.]
-        }).unwrap()
+        }).build().unwrap()
             .root(|_,u, r| *r = [u[0], u[0] - 100.])
             .solve(2., &mut u); // Time is past the root
         match r {
@@ -567,7 +633,7 @@ mod tests {
     fn compatible_with_eyre() -> eyre::Result<()> {
         let ctx = context!().unwrap();
         let _ = CVode::adams(ctx, 0., &[1.], |t, y, dy: &mut [_;1]| {
-            *dy = [t * y[0]] })?;
+            *dy = [t * y[0]] }).build()?;
         Ok(())
     }
 }
