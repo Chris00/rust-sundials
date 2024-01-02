@@ -11,6 +11,17 @@ license = "BSD-3-Clause"
 keywords = ["ODE", "math", "numerics", "simulation", "science"]
 categories = ["mathematics", "science"]
 
+[features]
+default = ["arkode", "cvode", "ida", "kinsol"]
+arkode = ["sundials-sys/arkode"]
+cvode = ["sundials-sys/cvode"]
+cvodes = ["sundials-sys/cvodes"]
+ida = ["sundials-sys/ida"]
+idas = ["sundials-sys/idas"]
+kinsol = ["sundials-sys/kinsol"]
+nvecopenmp = ["sundials-sys/nvecopenmp"]
+nvecpthreads = ["sundials-sys/nvecpthreads"]
+
 [dependencies]
 sundials-sys = "0.4.0"
 mpi = { version = "0.7.0", optional = true, default-features = false }
@@ -18,3 +29,7 @@ mpi = { version = "0.7.0", optional = true, default-features = false }
 [dev-dependencies]
 eyre = "0.6.8"
 doc-comment = "0.3.3"
+
+[package.metadata.docs.rs]
+
+features = ["arkode", "cvode", "cvodes", "ida", "idas", "kinsol", "nvecopenmp", "nvecpthreads"]

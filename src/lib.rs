@@ -48,11 +48,17 @@ macro_rules! assert_eq_tol {
     }
 }
 
+#[cfg(feature = "arkode")]
 mod arkode;
+#[cfg(feature = "cvode")]
 pub mod cvode;
+#[cfg(feature = "cvodes")]
 mod cvodes;
+#[cfg(feature = "ida")]
 mod ida;
+#[cfg(feature = "idas")]
 mod idas;
+#[cfg(feature = "kinsol")]
 mod kinsol;
 
 pub mod vector;
