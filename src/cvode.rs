@@ -23,8 +23,8 @@ use super::{
     Context,
     Error,
     vector::Vector,
-    Matrix,
-    LinSolver
+    matrix::Matrix,
+    linear_solver::LinSolver,
 };
 
 /// Configuration of a CVode solver.
@@ -172,7 +172,7 @@ where
             self.ctx.as_ptr(),
             V::as_ptr(&y0) as *mut _)? };
         let r = unsafe { CVodeSetLinearSolver(
-            cvode_mem.0, linsolver.0, ptr::null_mut()) };
+            cvode_mem.0, linsolver.as_ptr(), ptr::null_mut()) };
         if r != CVLS_SUCCESS as i32 {
             return Err(Error::Failure {
                 name: self.name,
