@@ -565,7 +565,7 @@ mod tests {
         let mut ode = CVode::adams(ctx, 0., &[1.],
             |_, _, du| *du = [1.]).build().unwrap();
         let mut u = [f64::NAN];
-        ode.solve(1., &mut u);
+        assert_eq!(ode.solve(1., &mut u), CVStatus::Ok);
         assert_eq!(ode.solve(0., &mut u), CVStatus::IllInput);
     }
 
@@ -577,7 +577,9 @@ mod tests {
             CVode::adams(ctx, 0., &init, |_,_, du| *du = [1.])
                 .build().unwrap()
         };
-        assert_eq!(ode().cauchy(0., &init, 1.).0, [1.]);
+        let (u, st) = ode().cauchy(0., &init, 1.);
+        assert_eq!(u, [1.]);
+        assert_eq!(st, CVStatus::Ok)
     }
 
     #[test]
@@ -605,7 +607,8 @@ mod tests {
         let mut ode = CVode::adams(ctx, 0., &[0.],
                                    |_,_, du| *du = [c]).build().unwrap();
         let mut u1 = [f64::NAN];
-        ode.solve(1., &mut u1);
+        let ret = ode.solve(1., &mut u1);
+        assert_eq!(ret, CVStatus::Ok);
         assert_eq_tol!(u1[0], c, 1e-5);
     }
 
