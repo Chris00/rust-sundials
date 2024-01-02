@@ -12,9 +12,8 @@
 //! ```
 //! use sundials::{context, cvode::CVode};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let ctx = context!()?;
-//! let mut ode = CVode::adams(ctx, 0., &[0.], |t, u, du| *du = [1.])
-//!     .build()?;
+//! let mut ode = CVode::adams(0., &[0.], |t, u, du| *du = [1.])
+//!     .build(context!()?)?;
 //! let (u1, _) = ode.cauchy(0., &[0.], 1.);
 //! assert_eq!(u1[0], 1.);
 //! # Ok(()) }

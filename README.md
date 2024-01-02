@@ -13,8 +13,8 @@ function (t,u) ↦ 1 using Adams' method.
 ```rust
 use sundials::{context, cvode::CVode};
 fn main() -> Result<(), Box<sundials::Error>> {
-    let ctx = context!()?;
-    let mut ode = CVode::adams(ctx, 0., &[0.], |t, u, du| *du = [1.]).build()?;
+    let mut ode = CVode::adams(0., &[0.], |t, u, du| *du = [1.])
+	    .build(context!()?)?;
 	let mut u1 = [f64::NAN];
 	ode.solve(2., &mut u1);
 	assert_eq!(u1, [2.]);

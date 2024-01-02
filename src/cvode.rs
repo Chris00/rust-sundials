@@ -6,8 +6,8 @@
 //!
 //! ```
 //! use sundials::{context, cvode::CVode};
-//! let ctx = context!()?;
-//! let mut ode = CVode::adams(ctx, 0., &[0.], |t, u, du| *du = [1.]).build()?;
+//! let mut ode = CVode::adams(0., &[0.], |t, u, du| *du = [1.])
+//!     .build(context!(P1)?)?;
 //! let (u1, _) = ode.cauchy(0., &[0.], 1.);
 //! assert_eq!(u1[0], 1.);
 //! # Ok::<(), sundials::Error>(())
@@ -28,9 +28,9 @@ use super::{
 };
 
 /// Configuration of a CVode solver.
-pub struct CVodeConf<'a, Ctx, V, F, G>
+#[derive(Clone)]
+pub struct CVodeConf<'a, V, F, G, const M: usize>
 where V: Vector {
-    ctx: Ctx,
     name: &'static str,
     lmm: c_int,
     t0: f64,
@@ -45,20 +45,23 @@ where V: Vector {
     max_hnil_warns: i32,
 }
 
-impl<'a, Ctx, V, F, G> CVodeConf<'a, Ctx, V, F, G>
+type RootFn<V, const M: usize> = fn(f64, &V, &mut [f64; M]);
+
+impl<'a, V, F> CVodeConf<'a, V, F, (), 0>
 where
-    Ctx: Context,
     V: Vector,
     F: FnMut(f64, &V, &mut V),
 {
+    fn dummy_g(_: f64, _: &V, _: &mut [f64; 0]) {}
+
     fn new(
-        ctx: Ctx, name: &'static str, lmm: c_int,
-        t0: f64, y0: &'a V, f: F, g: G,
-    ) -> Self {
-        Self {
-            ctx, name, lmm,
+        name: &'static str, lmm: c_int,
+        t0: f64, y0: &'a V, f: F,
+    ) -> CVodeConf<'a, V, F, RootFn<V, 0>, 0> {
+        CVodeConf {
+            name, lmm,
             t0, y0,
-            f, g,
+            f,  g: Self::dummy_g,
             rtol: 1e-6,
             atol: 1e-12,
             tstop: None,
@@ -68,20 +71,15 @@ where
             max_hnil_warns: 10, // Default
         }
     }
+}
 
-    /// Return a reference to the [`Context`] the CVode configuration
-    /// was built with.
-    pub fn context(&self) -> &Ctx {
-        &self.ctx
-    }
-
-    /// Consumes CVode configuration and return the [`Context`] it was
-    /// built with.
-    pub fn into_context(self) -> Ctx {
-        self.ctx
-    }
-
-        /// Set the relative tolerance.
+impl<'a, V, F, G, const M: usize> CVodeConf<'a, V, F, G, M>
+where
+    V: Vector,
+    F: FnMut(f64, &V, &mut V),
+    G: FnMut(f64, &V, &mut [f64; M]),
+{
+    /// Set the relative tolerance.
     pub fn rtol(mut self, rtol: f64) -> Self {
         self.rtol = rtol.max(0.);
         self
@@ -128,12 +126,38 @@ where
         self
     }
 
-    /// Build the ODE solver.
-    pub fn build(self) -> Result<CVode<Ctx, V, F, G>, super::Error> {
+    /// Specifies that the roots of a set of functions gᵢ(t, y),
+    /// 0 ≤ `i` < `N` (given by `g`(t,y, [g₁,...,gₙ])) are to be
+    /// found while the IVP is being solved.
+    ///
+    pub fn root<const MG: usize, R>(self, g: R) -> CVodeConf<'a, V, F, R, MG>
+    where R: FnMut(f64, &V, &mut [f64; MG]) {
+        // It would be natural to want `[f64; Mg]` to be replaced by
+        // `V`.  However, the C function (see `cvroot1`) passed to
+        // Sundials will only provide `*mut f64` and not a `N_Vector`.
+        // Since we do not know how this was allocated (it is not an
+        // N_Vector), no other interface can be provided.
+        CVodeConf {
+            name: self.name,  lmm: self.lmm,
+            t0: self.t0,  y0: self.y0,
+            f: self.f,  g,
+            rtol: self.rtol,
+            atol: self.atol,
+            tstop: self.tstop,
+            maxord: self.maxord,
+            mxsteps: self.mxsteps,
+            max_hnil_warns: self.max_hnil_warns,
+        }
+    }
+
+    /// Build the ODE solver with the [`Context`] `ctx`.
+    pub fn build<Ctx: Context>(
+        self, ctx: Ctx,
+    ) -> Result<CVode<Ctx, V, F, G>, super::Error> {
         // All configuration errors are reported by this function,
         // which is easier for the user.
         let cvode_mem = unsafe {
-            CVodeMem(CVodeCreate(self.lmm, self.ctx.as_ptr())) };
+            CVodeMem(CVodeCreate(self.lmm, ctx.as_ptr())) };
         if cvode_mem.0.is_null() {
             return Err(Error::Failure{
                 name: self.name,
@@ -144,7 +168,7 @@ where
         // copied to internal structures and thus can be freed.
         let y0 = self.y0.borrow();
         let y0 =
-            match unsafe { V::as_nvector(y0, self.ctx.as_ptr()) } {
+            match unsafe { V::as_nvector(y0, ctx.as_ptr()) } {
                 Some(y0) => y0,
                 None => panic!("The context of y0 is not the same as the \
                     context of the CVode solver."),
@@ -169,7 +193,7 @@ where
         // the `…nvgetarraypointer` on vectors (FIXME: configurable)
         let linsolver = unsafe { LinSolver::spgmr(
             self.name,
-            self.ctx.as_ptr(),
+            ctx.as_ptr(),
             V::as_ptr(&y0) as *mut _)? };
         let r = unsafe { CVodeSetLinearSolver(
             cvode_mem.0, linsolver.as_ptr(), ptr::null_mut()) };
@@ -209,12 +233,25 @@ where
             }
         }
         unsafe { CVodeSetMaxHnilWarns(cvode_mem.0, self.max_hnil_warns) };
+        let mut rootsfound;
+        if M > 0 {
+            let r = unsafe  {
+                CVodeRootInit(cvode_mem.0, M as _,
+                    Some(Self::cvroot1)) };
+            if r == CV_MEM_FAIL {
+                panic!("Sundials::cvode::CVode::root: memory allocation \
+                    failed.");
+            }
+            rootsfound = Vec::with_capacity(M);
+            rootsfound.resize(M, 0);
+        } else {
+            rootsfound = vec![];
+        }
         Ok(CVode {
-            ctx: self.ctx,  cvode_mem,
+            ctx,  cvode_mem,
             t0: self.t0,  vec: PhantomData,
-            rtol: self.rtol,  atol: self.atol,
-            matrix: None,  linsolver: Some(linsolver),
-            rootsfound: vec![],
+            _matrix: None,  _linsolver: Some(linsolver),
+            rootsfound,
             user_data: UserData { f: self.f, g: self.g }
         })
     }
@@ -228,7 +265,7 @@ where
             // Get f from user_data, whatever the type of g.
             let y = V::from_nvector(nvy);
             let dy = V::from_nvector_mut(nvdy);
-            let u = unsafe { &mut *(user_data as *mut UserData<F, ()>) };
+            let u = unsafe { &mut *(user_data as *mut UserData<F, G>) };
             (u.f)(t, y, dy);
         }) {
             Ok(()) => 0,
@@ -238,6 +275,25 @@ where
                 std::process::abort() // Doesn't unwind
             }
         }
+    }
+
+    /// Callback for the root-finding callback for `M` functions,
+    /// where `M` is known at compile time.
+    extern "C" fn cvroot1(
+        t: f64, y: N_Vector, gout: *mut f64, user_data: *mut c_void) -> c_int {
+        // Protect against unwinding in C code.
+        match std::panic::catch_unwind(|| {
+            let u = unsafe { &mut *(user_data as *mut UserData<F, G>) };
+            let out = unsafe { &mut *(gout as *mut [f64; M]) };
+            (u.g)(t, V::from_nvector(y), out);
+        }) {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("sundials::CVode: function passed to .root() \
+                           panicked: {:?}", e);
+                std::process::abort() // Doesn't unwind
+            }
+       }
     }
 }
 
@@ -286,12 +342,10 @@ where V: Vector {
     cvode_mem: CVodeMem,
     t0: f64,
     vec: PhantomData<V>,
-    rtol: f64,
-    atol: f64,
     // We hold `Matrix` and `LinSolver` so they are freed when `CVode`
     // is dropped.
-    matrix: Option<Matrix>,
-    linsolver: Option<LinSolver>,
+    _matrix: Option<Matrix>,
+    _linsolver: Option<LinSolver>,
     rootsfound: Vec<c_int>, // cache, with len() == number of eq
     user_data: UserData<F, G>,
 }
@@ -305,29 +359,26 @@ struct UserData<F, G> {
     g: G, // Function whose roots we want to compute (if any)
 }
 
-impl<Ctx, V, F> CVode<Ctx, V, F, ()>
-where Ctx: Context,
-      V: Vector + Sized,
+impl<V, F> CVode<(), V, F, ()>
+where V: Vector + Sized,
       F: FnMut(f64, &V, &mut V)
 {
     /// Solver using the Adams linear multistep method.  Recommended
     /// for non-stiff problems.
     // The fixed-point solver is recommended for nonstiff problems.
     pub fn adams<'a>(
-        ctx: Ctx, t0: f64, y0: &'a V, f: F
-    ) -> CVodeConf<'a, Ctx, V, F, ()> {
-        CVodeConf::new(
-            ctx,"CVode::adams", CV_ADAMS, t0, y0, f, ())
+        t0: f64, y0: &'a V, f: F
+    ) -> CVodeConf<'a, V, F, RootFn<V, 0>, 0> {
+        CVodeConf::new("CVode::adams", CV_ADAMS, t0, y0, f)
     }
 
     /// Solver using the BDF linear multistep method.  Recommended for
     /// stiff problems.
     // The default Newton iteration is recommended for stiff problems,
     pub fn bdf<'a>(
-        ctx: Ctx, t0: f64, y0: &'a V, f: F
-    ) -> CVodeConf<'a, Ctx, V, F, ()> {
-        CVodeConf::new(
-            ctx, "CVode::bdf", CV_BDF, t0, y0, f, ())
+        t0: f64, y0: &'a V, f: F
+    ) -> CVodeConf<'a, V, F, RootFn<V, 0>, 0> {
+        CVodeConf::new("CVode::bdf", CV_BDF, t0, y0, f)
     }
 }
 
@@ -357,57 +408,6 @@ where Ctx: Context,
             ptr as *mut c_void) };
         debug_assert_eq!(ret, 0);
     }
-
-    /// Callback for the root-finding callback for `N` functions,
-    /// where `N` is known at compile time.
-    extern "C" fn cvroot1<const N: usize, G1>(
-        t: f64, y: N_Vector, gout: *mut f64, user_data: *mut c_void) -> c_int
-    where G1: FnMut(f64, &V, &mut [f64; N]) {
-        // Protect against unwinding in C code.
-        match std::panic::catch_unwind(|| {
-            let u = unsafe { &mut *(user_data as *mut UserData<F, G1>) };
-            let out = unsafe { &mut *(gout as *mut [f64; N]) };
-            (u.g)(t, V::from_nvector(y), out);
-        }) {
-            Ok(()) => 0,
-            Err(e) => {
-                eprintln!("sundials::CVode: function passed to .root() \
-                           panicked: {:?}", e);
-                std::process::abort() // Doesn't unwind
-            }
-       }
-    }
-
-    /// Specifies that the roots of a set of functions gᵢ(t, y),
-    /// 0 ≤ `i` < `N` (given by `g`(t,y, [g₁,...,gₙ])) are to be
-    /// found while the IVP is being solved.
-    ///
-    pub fn root<const M: usize, R>(self, g: R) -> CVode<Ctx, V, F, R>
-    where R: FnMut(f64, &V, &mut [f64; M]) {
-        // FIXME: Do we want a second (because it will not work when V
-        // = [f64;N] since the number of equations is usually not the
-        // same as the dimension of the problem) function accepting
-        // V::ViewMut and a dim as second parameter?  In this case,
-        // one must wrap `g` to check for the dimension of the
-        // returned vector at each invocation.
-        let r = unsafe  {
-            CVodeRootInit(self.cvode_mem.0, M as _,
-                          Some(Self::cvroot1::<M, R>)) };
-        if r == CV_MEM_FAIL {
-            panic!("Sundials::cvode::CVode::root: memory allocation failed.");
-        }
-        let mut rootsfound = Vec::with_capacity(M);
-        rootsfound.resize(M, 0);
-        CVode {
-            ctx: self.ctx,  cvode_mem: self.cvode_mem,
-            t0: self.t0,  vec: PhantomData,
-            rtol: self.rtol,  atol: self.atol,
-            matrix: self.matrix,  linsolver: self.linsolver,
-            rootsfound,
-            user_data: UserData { f: self.user_data.f, g },
-        }
-    }
-
 
     /// Set `y` to the solution at time `t`.
     ///
@@ -517,13 +517,14 @@ where Ctx: Context,
 
 #[cfg(test)]
 mod tests {
-    use crate::{context, cvode::{CVode, CVStatus}};
+    use crate::{context, Error, cvode::{CVode, CVStatus}};
 
     #[test]
     fn cvode_zero_time_step() {
         let ctx = context!(P0).unwrap();
-        let mut ode = CVode::adams(ctx, 0., &[0.],
-            |_,_, du| *du = [1.]).build().unwrap();
+        let mut ode = CVode::adams(0., &[0.],
+            |_,_, du| *du = [1.])
+            .build(ctx).unwrap();
         let mut u1 = [f64::NAN];
         let cv = ode.solve(0., &mut u1);
         assert_eq!(cv, CVStatus::TooClose);
@@ -531,17 +532,17 @@ mod tests {
 
     #[test]
     fn cvode_solution() {
-        let ctx = context!().unwrap();
-        let mut ode = CVode::adams(ctx, 0., &[0.],
-            |_,_, du| *du = [1.]).build().unwrap();
+        let mut ode = CVode::adams(0., &[0.],
+            |_,_, du| *du = [1.])
+            .build(context!().unwrap()).unwrap();
         assert_eq!(ode.cauchy(0., &[0.], 1.).0, [1.]);
     }
 
     #[test]
     fn cvode_exp() {
-        let ctx = context!().unwrap();
-        let mut ode = CVode::adams(ctx, 0., &[1.],
-            |_,u, du| *du = *u).build().unwrap();
+        let mut ode = CVode::adams(0., &[1.],
+            |_,u, du| *du = *u)
+            .build(context!().unwrap()).unwrap();
         let mut u1 = [f64::NAN];
         ode.solve(1., &mut u1);
         assert_eq_tol!(u1[0], 1f64.exp(), 1e-5);
@@ -549,11 +550,11 @@ mod tests {
 
     #[test]
     fn cvode_sin() {
-        let ctx = context!().unwrap();
-        let mut ode = CVode::adams(ctx, 0., &[0., 1.], |_, u, du| {
+        let mut ode = CVode::adams(0., &[0., 1.], |_, u, du| {
             *du = [u[1], -u[0]]
         })
-            .mxsteps(500).build().unwrap();
+            .mxsteps(500)
+            .build(context!().unwrap()).unwrap();
         let mut u1 = [f64::NAN, f64::NAN];
         ode.solve(1., &mut u1);
         assert_eq_tol!(u1[0], 1f64.sin(), 1e-5);
@@ -562,8 +563,8 @@ mod tests {
     #[test]
     fn cvode_nonmonotonic_time() {
         let ctx = context!().unwrap();
-        let mut ode = CVode::adams(ctx, 0., &[1.],
-            |_, _, du| *du = [1.]).build().unwrap();
+        let mut ode = CVode::adams(0., &[1.],
+            |_, _, du| *du = [1.]).build(ctx).unwrap();
         let mut u = [f64::NAN];
         assert_eq!(ode.solve(1., &mut u), CVStatus::Ok);
         assert_eq!(ode.solve(0., &mut u), CVStatus::IllInput);
@@ -574,8 +575,8 @@ mod tests {
         let ctx = context!().unwrap();
         let init = [0.];
         let ode = move || {
-            CVode::adams(ctx, 0., &init, |_,_, du| *du = [1.])
-                .build().unwrap()
+            CVode::adams(0., &init, |_,_, du| *du = [1.])
+                .build(ctx).unwrap()
         };
         let (u, st) = ode().cauchy(0., &init, 1.);
         assert_eq!(u, [1.]);
@@ -583,29 +584,33 @@ mod tests {
     }
 
     #[test]
-    fn cvode_refs() {
+    fn cvode_clone_config() -> Result<(), Error> {
         let init = [1., 2.];
-        let ode = || {
-            let ctx = context!().unwrap();
-            CVode::adams(ctx, 0., &init, |_,_, du: &mut [_;2]| {
+        let ode =
+            CVode::adams(0., &init, |_,_, du: &mut [_;2]| {
                 *du = [1., 1.]
-            }).build().unwrap()
-        };
-        assert_eq!(ode().cauchy(0., &init, 1.).0, [2., 3.]);
-        let (u, cv) = ode()
+            });
+        let ctx = context!(P1)?;
+        assert_eq!(ode.clone().build(ctx)?.cauchy(0., &init, 1.).0, [2., 3.]);
+        let ctx = context!(P2)?;
+        let (u, cv) = ode.clone()
             .root(|_, &u, z| *z = [u[0] - 2.])
+            .build(ctx)?
             .cauchy(0., &init, 2.);
         assert!(matches!(cv, CVStatus::Root(_,_)));
         assert_eq!(u, [2., 3.]);
-        assert_eq!(ode().cauchy(0., &init, 2.).0, [3., 4.]);
+        let ctx = context!(P3)?;
+        assert_eq!(ode.build(ctx)?.cauchy(0., &init, 2.).0, [3., 4.]);
+        Ok(())
     }
 
     #[test]
     fn cvode_with_param() {
         let ctx = context!().unwrap();
         let c = 1.;
-        let mut ode = CVode::adams(ctx, 0., &[0.],
-                                   |_,_, du| *du = [c]).build().unwrap();
+        let mut ode = CVode::adams(0., &[0.],
+            |_,_, du| *du = [c])
+            .build(ctx).unwrap();
         let mut u1 = [f64::NAN];
         let ret = ode.solve(1., &mut u1);
         assert_eq!(ret, CVStatus::Ok);
@@ -616,10 +621,11 @@ mod tests {
     fn cvode_with_root() {
         let ctx = context!().unwrap();
         let mut u = [f64::NAN; 2];
-        let r = CVode::adams(ctx, 0., &[0., 1.],  |_, u, du: &mut [_;2]| {
+        let r = CVode::adams(0., &[0., 1.],  |_, u, du: &mut [_;2]| {
             *du = [u[1], -2.]
-        }).build().unwrap()
+        })
             .root(|_,u, r| *r = [u[0], u[0] - 100.])
+            .build(ctx).unwrap()
             .solve(2., &mut u); // Time is past the root
         match r {
             CVStatus::Root(t, roots) => {
@@ -635,8 +641,9 @@ mod tests {
     #[test]
     fn compatible_with_eyre() -> eyre::Result<()> {
         let ctx = context!().unwrap();
-        let _ = CVode::adams(ctx, 0., &[1.], |t, y, dy: &mut [_;1]| {
-            *dy = [t * y[0]] }).build()?;
+        let _ = CVode::adams(0., &[1.], |t, y, dy: &mut [_;1]| {
+            *dy = [t * y[0]] })
+            .build(ctx)?;
         Ok(())
     }
 }
