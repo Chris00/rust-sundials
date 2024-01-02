@@ -64,13 +64,13 @@ pub mod vector;
 pub enum Error {
     /// The function or method failed with the attached message
     /// (without further details).
-    Fail { name: &'static str, msg: &'static str },
+    Failure { name: &'static str, msg: &'static str },
 }
 
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Error::Fail { name, msg} => {
+            Error::Failure { name, msg} => {
                 if msg.is_empty() {
                     write!(f, "The function {} failed.", name)
                 } else {
@@ -228,8 +228,10 @@ impl __BoxedContext {
     ) -> Result<Self, Error> {
         let mut ctx: SUNContext = ptr::null_mut();
         if unsafe { SUNContext_Create(comm, &mut ctx as *mut _) } < 0 {
-            return Err(Error::Fail { name: "Context::new",
-                                     msg: "Failed to create a context" })
+            return Err(Error::Failure {
+                name: "Context::new",
+                msg: "Failed to create a context"
+            })
         }
         Ok(Self(ctx))
     }
@@ -287,7 +289,7 @@ impl Matrix {
         let mat = unsafe {
             SUNDenseMatrix(m as _, n as _, ctx.as_ptr()) };
         if mat.is_null() {
-            Err(Error::Fail{name, msg: "matrix allocation failed"})
+            Err(Error::Failure{name, msg: "matrix allocation failed"})
         } else {
             Ok(Matrix(mat))
         }
@@ -315,7 +317,10 @@ impl LinSolver {
         let linsolver = unsafe {
             SUNLinSol_SPGMR(vec, SUN_PREC_NONE as _, 30, ctx) };
         if linsolver.is_null() {
-            Err(Error::Fail{ name, msg: "linear solver  allocation failed"})
+            Err(Error::Failure {
+                name,
+                msg: "linear solver  allocation failed"
+            })
         } else {
             Ok(LinSolver(linsolver))
         }

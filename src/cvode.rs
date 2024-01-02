@@ -141,7 +141,7 @@ where Ctx: Context,
         let cvode_mem = unsafe {
             CVodeMem(CVodeCreate(lmm, ctx.as_ptr())) };
         if cvode_mem.0.is_null() {
-            return Err(Error::Fail{name, msg: "Allocation failed"})
+            return Err(Error::Failure{name, msg: "Allocation failed"})
         }
         // let n = V::len(y0);
         // SAFETY: Once `y0` has been passed to `CVodeInit`, it is
@@ -159,11 +159,11 @@ where Ctx: Context,
             V::as_ptr(&y0) as *mut _) };
         if r == CV_MEM_FAIL {
             let msg = "a memory allocation request has failed";
-            return Err(Error::Fail{name, msg})
+            return Err(Error::Failure{name, msg})
         }
         if r == CV_ILL_INPUT {
             let msg = "An input argument has an illegal value";
-            return Err(Error::Fail{name, msg})
+            return Err(Error::Failure{name, msg})
         }
         let rtol = 1e-6;
         let atol = 1e-12;
@@ -177,7 +177,10 @@ where Ctx: Context,
         let r = unsafe { CVodeSetLinearSolver(
             cvode_mem.0, linsolver.0, ptr::null_mut()) };
         if r != CVLS_SUCCESS as i32 {
-            return Err(Error::Fail{name, msg: "could not attach linear solver"})
+            return Err(Error::Failure {
+                name,
+                msg: "could not attach linear solver"
+            })
         }
         Ok(Self::new_with_fn(
             ctx, cvode_mem, t0,
