@@ -10,9 +10,6 @@ pub trait NVectorOps: Clone {
     /// Length of the vector.
     fn len(&self) -> usize;
 
-    /// Return a new vector.
-    fn new(len: usize) -> Self;
-
     /// Sets all components of `z` to `c`: ∀i, zᵢ = c.
     fn const_assign(z: &mut Self, c: f64);
 
@@ -182,20 +179,6 @@ where V: NVectorOps + 'a {
             return ptr::null_mut()
         }
         (*nv).content = Box::into_raw(Box::new(v)) as *mut c_void;
-        nv
-    }
-
-    /// Creates a new N_Vector of the same type as an existing vector
-    /// w and sets the ops field. It does not allocate storage for the
-    /// new vector’s data.
-    unsafe extern "C" fn nvcloneempty_rust(nw: N_Vector) -> N_Vector {
-        let w = Self::ref_of_nvector(nw);
-        let nv = N_VNewEmpty((*nw).sunctx);
-        if N_VCopyOps(nw, nv) != 0 {
-            return ptr::null_mut();
-        }
-        let n = w.len();
-        (*nv).content = Box::into_raw(Box::new(V::new(n))) as *mut c_void;
         nv
     }
 
@@ -467,7 +450,11 @@ where V: NVectorOps + 'a {
         _generic_N_Vector_Ops {
             nvgetvectorid: Some(nvgetvectorid_rust),
             nvclone: Some(Self::nvclone_rust),
-            nvcloneempty: Some(Self::nvcloneempty_rust),
+            // Contrarily to "nvclone", "nvcloneempty" does not
+            // allocate the storage for the vector data.  This is only
+            // used in some linear solvers (that custom vectors will
+            // not support) in combination with `N_VSetArrayPointer`.
+            nvcloneempty: None,
             nvdestroy: Some(Self::nvdestroy_rust),
             nvspace: Some(Self::nvspace_rust),
             nvgetarraypointer: None,
@@ -598,6 +585,8 @@ where V: NVectorOps + 'a + AsRef<[f64]> + AsMut<[f64]> {
     #[inline]
     fn ops_slice() -> _generic_N_Vector_Ops {
         let mut ops = Self::ops();
+        // FIXME:
+        //ops.nvcloneempty = Some(...);
         ops.nvgetarraypointer = Some(Self::nvgetarraypointer_rust);
         ops.nvsetarraypointer = Some(Self::nvsetarraypointer_rust);
         ops
@@ -916,9 +905,6 @@ impl<const N: usize> NVectorOps for [f64; N] {
     #[inline]
     fn len(&self) -> usize { N }
 
-    #[inline]
-    fn new(_: usize) -> Self { [0.; N] }
-
     nvector_ops_for_iter!();
 }
 
@@ -965,13 +951,6 @@ unsafe impl<const N: usize> super::Vector for [f64; N] {
 impl NVectorOps for Vec<f64> {
     #[inline]
     fn len(&self) -> usize { Vec::len(&self) }
-
-    #[inline]
-    fn new(len: usize) -> Self {
-        let mut v = Vec::with_capacity(len);
-        v.resize(len, 0.);
-        v
-    }
 
     nvector_ops_for_iter!();
 }
