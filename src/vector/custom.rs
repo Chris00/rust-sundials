@@ -1,17 +1,17 @@
 //! Custom N_Vector that hold any Rust value (that possesses some
 //! operations).
 
-use std::{ffi::c_void, marker::PhantomData, ptr, fmt::Debug};
+use std::{ffi::c_void, marker::PhantomData, ptr};
 use sundials_sys::*;
 
 /// Operations that Rust values must support to be converted to
 /// Sundials N_Vector.
-pub trait NVector: Clone + Debug {
+pub trait NVectorOps: Clone {
     /// Length of the vector.
     fn len(&self) -> usize;
 
     /// Return a new vector.
-    fn new() -> Self;
+    fn new(len: usize) -> Self;
 
     /// Sets all components of `z` to `c`: ∀i, zᵢ = c.
     fn const_assign(z: &mut Self, c: f64);
@@ -151,7 +151,7 @@ extern "C" fn nvgetvectorid_rust(_: N_Vector) -> N_Vector_ID {
 // be for `Shared` ones but also for clones that will live inside
 // Sundials solvers,...
 impl<'a, V> Shared<&'a mut V>
-where V: NVector + 'a {
+where V: NVectorOps + 'a {
     /// Return the Rust value stored in the N_Vector.
     ///
     /// # Safety
@@ -189,11 +189,13 @@ where V: NVector + 'a {
     /// w and sets the ops field. It does not allocate storage for the
     /// new vector’s data.
     unsafe extern "C" fn nvcloneempty_rust(nw: N_Vector) -> N_Vector {
+        let w = Self::ref_of_nvector(nw);
         let nv = N_VNewEmpty((*nw).sunctx);
         if N_VCopyOps(nw, nv) != 0 {
             return ptr::null_mut();
         }
-        (*nv).content = Box::into_raw(Box::new(V::new())) as *mut c_void;
+        let n = w.len();
+        (*nv).content = Box::into_raw(Box::new(V::new(n))) as *mut c_void;
         nv
     }
 
@@ -570,7 +572,7 @@ where V: NVector + 'a {
 
 
 impl<'a, V> Shared<&'a mut V>
-where V: NVector + 'a + AsRef<[f64]> + AsMut<[f64]> {
+where V: NVectorOps + 'a + AsRef<[f64]> + AsMut<[f64]> {
     // FIXME: These functions are used in some linear solvers, thus
     // not on values managed by Rust (except for the temporary
     // conversion in these functions).
@@ -680,13 +682,7 @@ fn linear_sum_serial<'a>(
     }
 }
 
-impl<const N: usize> NVector for [f64; N] {
-    #[inline]
-    fn len(&self) -> usize { N }
-
-    #[inline]
-    fn new() -> Self { [0.; N] }
-
+macro_rules! nvector_ops_for_iter { () => {
     #[inline]
     fn linear_sum_assign(z: &mut Self, a: f64, x: &Self, b: f64, y: &Self) {
         linear_sum_serial(z.iter_mut(), a, x.iter(), b, y.iter())
@@ -914,6 +910,16 @@ impl<const N: usize> NVector for [f64; N] {
         }
         m
     }
+}}
+
+impl<const N: usize> NVectorOps for [f64; N] {
+    #[inline]
+    fn len(&self) -> usize { N }
+
+    #[inline]
+    fn new(_: usize) -> Self { [0.; N] }
+
+    nvector_ops_for_iter!();
 }
 
 unsafe impl<const N: usize> super::Vector for [f64; N] {
@@ -933,6 +939,60 @@ unsafe impl<const N: usize> super::Vector for [f64; N] {
 
     type NVectorRef<'a> = Shared<&'a [f64; N]>;
     type NVectorMut<'a> = Shared<&'a mut [f64; N]>;
+
+    #[inline]
+    unsafe fn as_nvector(
+        v: &Self, ctx: SUNContext) -> Option<Self::NVectorRef<'_>> {
+            Some(Shared::new_ref(v, ctx))
+    }
+
+    #[inline]
+    unsafe fn as_mut_nvector(
+        v: &mut Self, ctx: SUNContext) -> Option<Self::NVectorMut<'_>> {
+            Some(Shared::new_mut(v, ctx))
+        }
+
+    fn as_ptr(v: &Self::NVectorRef<'_>) -> *const _generic_N_Vector {
+        v.nv
+    }
+
+    fn as_mut_ptr(v: &Self::NVectorMut<'_>) -> N_Vector {
+        v.nv
+    }
+}
+
+
+impl NVectorOps for Vec<f64> {
+    #[inline]
+    fn len(&self) -> usize { Vec::len(&self) }
+
+    #[inline]
+    fn new(len: usize) -> Self {
+        let mut v = Vec::with_capacity(len);
+        v.resize(len, 0.);
+        v
+    }
+
+    nvector_ops_for_iter!();
+}
+
+unsafe impl super::Vector for Vec<f64> {
+    fn len(v: &Self) -> usize { Vec::len(v) }
+
+    fn from_nvector<'a>(nv: N_Vector) -> &'a Self {
+        unsafe {
+            ((*nv).content as *const Self).as_ref().unwrap()
+        }
+    }
+
+    fn from_nvector_mut<'a>(nv: N_Vector) -> &'a mut Self {
+        unsafe {
+            ((*nv).content as *mut Self).as_mut().unwrap()
+        }
+    }
+
+    type NVectorRef<'a> = Shared<&'a Vec<f64>>;
+    type NVectorMut<'a> = Shared<&'a mut Vec<f64>>;
 
     #[inline]
     unsafe fn as_nvector(
