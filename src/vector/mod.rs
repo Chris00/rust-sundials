@@ -32,8 +32,9 @@ pub unsafe trait Vector: Clone {
     type NVectorMut<'a>;
 
     /// Return a wrapper of a `N_Vector` that references `self`.  If
-    /// `self` already possesses a [`Context`], this *must* check that
-    /// both contexts are the same and return `None` otherwise.
+    /// `self` already possesses a [`Context`][crate::Context], this
+    /// *must* check that both contexts are the same and return `None`
+    /// otherwise.
     ///
     /// # Safety
     /// The return value must not outlive `ctx` (and neither `self` but
@@ -42,8 +43,9 @@ pub unsafe trait Vector: Clone {
         v: &Self, ctx: SUNContext) -> Option<Self::NVectorRef<'_>>;
 
     /// Return a wrapper of a `N_Vector` that can mutate `self`.  If
-    /// `self` already possesses a [`Context`], this *must* check that
-    /// both contexts are the same and return `None` otherwise.
+    /// `self` already possesses a [`Context`][crate::Context], this
+    /// *must* check that both contexts are the same and return `None`
+    /// otherwise.
     ///
     /// # Safety
     /// The return value must not outlive `ctx` (and neither `self` but

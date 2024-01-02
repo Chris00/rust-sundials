@@ -311,14 +311,14 @@ impl Drop for CVodeMem {
 pub enum CVStatus {
     Ok,
     /// Succeeded by reaching the stopping point specified through
-    /// [`CVode::set_tstop`].
+    /// [`CVodeConf::set_tstop`].
     Tstop(f64),
     Root(f64, Vec<bool>),
     IllInput,
     /// The initial time `t0` and the output time `t` are too close to
     /// each other and the user did not specify an initial step size.
     TooClose,
-    /// The solver took [`CVode::mxsteps`] internal steps but could
+    /// The solver took [`CVodeConf::mxsteps`] internal steps but could
     /// not reach the final time.
     TooMuchWork,
     /// The solver could not satisfy the accuracy demanded by the user
