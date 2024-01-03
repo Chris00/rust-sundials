@@ -41,7 +41,7 @@ where V: Vector {
     atol: f64,
     tstop: Option<f64>,
     maxord: Option<u8>,
-    mxsteps: Option<i64>,
+    mxsteps: Option<usize>,
     max_hnil_warns: i32,
 }
 
@@ -103,8 +103,6 @@ where
     // FIXME: make sure "mxstep steps taken before reaching tout" does
     // not abort the program.
     pub fn mxsteps(mut self, n: usize) -> Self {
-        let n =
-            if n <= c_long::MAX as usize { n as _ } else { c_long::MAX };
         self.mxsteps = Some(n);
         self
     }
@@ -211,9 +209,10 @@ where
                 maxord as _); }
         }
         if let Some(mxsteps) = self.mxsteps {
-            unsafe { CVodeSetMaxNumSteps(
-                cvode_mem.0,
-                mxsteps) };
+            let n: c_long =
+                if mxsteps <= c_long::MAX as usize { mxsteps as _ }
+                else { c_long::MAX };
+            unsafe { CVodeSetMaxNumSteps(cvode_mem.0, n) };
         }
         if let Some(tstop) = self.tstop {
             if tstop.is_nan() {
