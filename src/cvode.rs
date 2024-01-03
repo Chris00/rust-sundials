@@ -201,8 +201,6 @@ where
                 msg: "could not attach linear solver"
             })
         }
-        unsafe { CVodeSStolerances(
-            cvode_mem.0, self.rtol, self.atol); }
         if let Some(maxord) = self.maxord {
             unsafe { CVodeSetMaxOrd(
                 cvode_mem.0,
