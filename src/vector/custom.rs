@@ -175,22 +175,36 @@ where V: NVectorOps + 'a {
         let w = Self::ref_of_nvector(nw);
         // Rust memory cannot be uninitialized, thus clone.
         let v = w.clone();
+        //// Sundials functions — slow.
         // let nv = N_VNewEmpty((*nw).sunctx);
         // if N_VCopyOps(nw, nv) != 0 {
-        //     return ptr::null_mut()
+        //     return std::ptr::null_mut()
         // }
         // (*nv).content = Box::into_raw(Box::new(v)) as *mut c_void;
         // nv
-        // Do not go through the C malloc for this (slow).
-        // FIXME: Problems with free?
+
+        //// Do not go through the C malloc for this
+        // FIXME: This is the fastest but are there problems with free?
+        // let sunctx = (*nw).sunctx;
+        // let ops = (*(*nw).ops).clone();
+        // let v = _generic_N_Vector {
+        //     sunctx,
+        //     ops: Box::into_raw(Box::new(ops)),
+        //     content: Box::into_raw(Box::new(v)) as *mut c_void,
+        // };
+        // Box::into_raw(Box::new(v))
+
+        //// libc version — safe as Sundials uses malloc.
         let sunctx = (*nw).sunctx;
-        let ops = (*(*nw).ops).clone();
-        let v = _generic_N_Vector {
-            sunctx,
-            ops: Box::into_raw(Box::new(ops)),
-            content: Box::into_raw(Box::new(v)) as *mut c_void,
-        };
-        Box::into_raw(Box::new(v))
+        let nv = libc::malloc(std::mem::size_of::<_generic_N_Vector>())
+            as N_Vector;
+        (*nv).sunctx = sunctx;
+        let n = std::mem::size_of::<_generic_N_Vector_Ops>();
+        let ops = libc::malloc(n);
+        libc::memcpy(ops, (*nw).ops as *mut c_void, n);
+        (*nv).ops = ops as N_Vector_Ops;
+        (*nv).content = Box::into_raw(Box::new(v)) as *mut c_void;
+        nv
     }
 
     /// Destroys the N_Vector `nv` and frees memory allocated for its

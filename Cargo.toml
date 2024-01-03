@@ -25,6 +25,7 @@ nvecpthreads = ["sundials-sys/nvecpthreads"]
 [dependencies]
 sundials-sys = "0.4.0"
 mpi = { version = "0.7.0", optional = true, default-features = false }
+libc = "0.2"
 
 [dev-dependencies]
 eyre = "0.6.8"
