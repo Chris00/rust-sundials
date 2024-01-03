@@ -1,7 +1,7 @@
 //! Custom N_Vector that hold any Rust value (that possesses some
 //! operations).
 
-use std::{ffi::c_void, marker::PhantomData, ptr};
+use std::{ffi::c_void, marker::PhantomData};
 use sundials_sys::*;
 
 /// Operations that Rust values must support to be converted to
@@ -155,6 +155,7 @@ where V: NVectorOps + 'a {
     /// This box must be leaked before it is dropped because the data
     /// belongs to `nv` if internal to Sundials or to another Rust
     /// value if it is shared.
+    #[inline]
     unsafe fn mut_of_nvector(nv: N_Vector) -> &'a mut V {
         // FIXME: When `nv` content is shared with another Rust value,
         // there will be temporarily be two Rust values pointing to the
@@ -174,12 +175,22 @@ where V: NVectorOps + 'a {
         let w = Self::ref_of_nvector(nw);
         // Rust memory cannot be uninitialized, thus clone.
         let v = w.clone();
-        let nv = N_VNewEmpty((*nw).sunctx);
-        if N_VCopyOps(nw, nv) != 0 {
-            return ptr::null_mut()
-        }
-        (*nv).content = Box::into_raw(Box::new(v)) as *mut c_void;
-        nv
+        // let nv = N_VNewEmpty((*nw).sunctx);
+        // if N_VCopyOps(nw, nv) != 0 {
+        //     return ptr::null_mut()
+        // }
+        // (*nv).content = Box::into_raw(Box::new(v)) as *mut c_void;
+        // nv
+        // Do not go through the C malloc for this (slow).
+        // FIXME: Problems with free?
+        let sunctx = (*nw).sunctx;
+        let ops = (*(*nw).ops).clone();
+        let v = _generic_N_Vector {
+            sunctx,
+            ops: Box::into_raw(Box::new(ops)),
+            content: Box::into_raw(Box::new(v)) as *mut c_void,
+        };
+        Box::into_raw(Box::new(v))
     }
 
     /// Destroys the N_Vector `nv` and frees memory allocated for its
