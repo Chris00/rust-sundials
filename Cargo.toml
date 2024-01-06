@@ -21,6 +21,7 @@ idas = ["sundials-sys/idas"]
 kinsol = ["sundials-sys/kinsol"]
 nvecopenmp = ["sundials-sys/nvecopenmp"]
 nvecpthreads = ["sundials-sys/nvecpthreads"]
+nightly = []
 
 [dependencies]
 sundials-sys = "0.4.0"

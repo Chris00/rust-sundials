@@ -23,6 +23,8 @@
 //!
 //! [Sundials]: https://computing.llnl.gov/projects/sundials
 
+#![cfg_attr(feature = "nightly", feature(allocator_api))]
+
 use std::{
     fmt::{self, Debug, Display, Formatter},
     ops::Drop,

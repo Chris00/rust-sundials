@@ -171,6 +171,25 @@ where V: NVectorOps + 'a {
     /// Creates a new N_Vector of the same type as an existing vector
     /// `nv` and sets the ops field.  It does not copy the vector, but
     /// rather allocates storage for the new vector.
+    #[cfg(feature = "nightly")]
+    unsafe extern "C" fn nvclone_rust(nw: N_Vector) -> N_Vector {
+        let w = Self::ref_of_nvector(nw);
+        // Rust memory cannot be uninitialized, thus clone.
+        let v = w.clone();
+        //// Do not go through the C malloc for this
+        let sunctx = (*nw).sunctx;
+        let ops = (*(*nw).ops).clone();
+        let v = _generic_N_Vector {
+            sunctx,
+            ops: Box::into_raw(Box::new(ops)),
+            content: Box::into_raw(Box::new(v)) as *mut c_void,
+        };
+        // The `new_in` using the `System` allocator should be
+        // compatible with the C code.
+        Box::into_raw(Box::new_in(v, std::alloc::System))
+    }
+
+    #[cfg(not(feature = "nightly"))]
     unsafe extern "C" fn nvclone_rust(nw: N_Vector) -> N_Vector {
         let w = Self::ref_of_nvector(nw);
         // Rust memory cannot be uninitialized, thus clone.
@@ -182,17 +201,6 @@ where V: NVectorOps + 'a {
         // }
         // (*nv).content = Box::into_raw(Box::new(v)) as *mut c_void;
         // nv
-
-        //// Do not go through the C malloc for this
-        // FIXME: This is the fastest but are there problems with free?
-        // let sunctx = (*nw).sunctx;
-        // let ops = (*(*nw).ops).clone();
-        // let v = _generic_N_Vector {
-        //     sunctx,
-        //     ops: Box::into_raw(Box::new(ops)),
-        //     content: Box::into_raw(Box::new(v)) as *mut c_void,
-        // };
-        // Box::into_raw(Box::new(v))
 
         //// libc version — safe as Sundials uses malloc.
         let sunctx = (*nw).sunctx;
