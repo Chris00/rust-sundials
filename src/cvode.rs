@@ -28,13 +28,20 @@ use super::{
 };
 
 /// Configuration of a CVode solver.
+///
+/// The parameters are: `'a` is the lifetime of the initial condition
+/// (only needed until [`build()`][CVodeConf::build]), `V` is the type
+/// of the vectors, `F` is the type of the right hand-side of the EDO,
+/// `G` is the type of the function whose root we seek (if any).
 #[derive(Clone)]
-pub struct CVodeConf<'a, V, F, G, const M: usize>
+pub struct CVodeConf<'a, V, F, G>
 where V: Vector {
     name: &'static str,
     lmm: c_int,
     t0: f64,
     y0: &'a V,
+    // FIXME: with further functions to pass (projfn, jac), there will
+    // be many types.
     f: F,
     g: G,
     rtol: f64,
@@ -45,19 +52,19 @@ where V: Vector {
     max_hnil_warns: i32,
 }
 
-type RootFn<V, const M: usize> = fn(f64, &V, &mut [f64; M]);
-
-impl<'a, V, F> CVodeConf<'a, V, F, (), 0>
+impl<'b, V, F> CVodeConf<'b, V, F, ()>
 where
     V: Vector,
     F: FnMut(f64, &V, &mut V),
 {
-    fn dummy_g(_: f64, _: &V, _: &mut [f64; 0]) {}
+    fn dummy_g(_: f64, _: &V, _: &mut [f64; 0]) {
+        unreachable!()
+    }
 
     fn new(
         name: &'static str, lmm: c_int,
-        t0: f64, y0: &'a V, f: F,
-    ) -> CVodeConf<'a, V, F, RootFn<V, 0>, 0> {
+        t0: f64, y0: &'b V, f: F,
+    ) -> CVodeConf<'b, V, F, fn(f64, &V, &mut [f64; 0])> {
         CVodeConf {
             name, lmm,
             t0, y0,
@@ -73,11 +80,10 @@ where
     }
 }
 
-impl<'a, V, F, G, const M: usize> CVodeConf<'a, V, F, G, M>
+impl<'a, V, F, G> CVodeConf<'a, V, F, G>
 where
     V: Vector,
     F: FnMut(f64, &V, &mut V),
-    G: FnMut(f64, &V, &mut [f64; M]),
 {
     /// Set the relative tolerance.
     pub fn rtol(mut self, rtol: f64) -> Self {
@@ -128,8 +134,23 @@ where
     /// 0 ≤ `i` < `N` (given by `g`(t,y, [g₁,...,gₙ])) are to be
     /// found while the IVP is being solved.
     ///
-    pub fn root<const MG: usize, R>(self, g: R) -> CVodeConf<'a, V, F, R, MG>
-    where R: FnMut(f64, &V, &mut [f64; MG]) {
+    /// # Example
+    ///
+    /// ```
+    /// use sundials::{context, cvode::{CVode, CVStatus}};
+    /// let mut ode = CVode::adams(0., &[0., 1.], |_t, y, dy| {
+    ///     dy[0] = y[1];
+    ///     dy[1] = -1.
+    /// })
+    ///     .root(|_t, y, z| *z = [y[0]])
+    ///     .build(context!()?)?;
+    /// let mut u = [f64::NAN; 2];
+    /// let cv = ode.solve(4., &mut u);
+    /// assert_eq!(cv, CVStatus::Root(2., vec![true]));
+    /// # Ok::<(), sundials::Error>(())
+    /// ```
+    pub fn root<const M: usize, R>(self, g: R) -> CVodeConf<'a, V, F, R>
+    where R: FnMut(f64, &V, &mut [f64; M]) {
         // It would be natural to want `[f64; Mg]` to be replaced by
         // `V`.  However, the C function (see `cvroot1`) passed to
         // Sundials will only provide `*mut f64` and not a `N_Vector`.
@@ -149,9 +170,10 @@ where
     }
 
     /// Build the ODE solver with the [`Context`] `ctx`.
-    pub fn build<Ctx: Context>(
+    pub fn build<Ctx: Context, const M: usize>(
         self, ctx: Ctx,
-    ) -> Result<CVode<Ctx, V, F, G>, super::Error> {
+    ) -> Result<CVode<Ctx, V, F, G>, super::Error>
+    where G: FnMut(f64, &V, &mut [f64; M]) {
         // All configuration errors are reported by this function,
         // which is easier for the user.
         let cvode_mem = unsafe {
@@ -267,7 +289,7 @@ where
         }) {
             Ok(()) => 0,
             Err(e) => {
-                eprintln!("sundials::CVode: right-hand side function \
+                eprintln!("sundials::cvode::CVode: right-hand side function \
                            panicked: {:?}", e);
                 std::process::abort() // Doesn't unwind
             }
@@ -276,8 +298,9 @@ where
 
     /// Callback for the root-finding callback for `M` functions,
     /// where `M` is known at compile time.
-    extern "C" fn cvroot1(
-        t: f64, y: N_Vector, gout: *mut f64, user_data: *mut c_void) -> c_int {
+    extern "C" fn cvroot1<const M: usize>(
+        t: f64, y: N_Vector, gout: *mut f64, user_data: *mut c_void) -> c_int
+    where G: FnMut(f64, &V, &mut [f64; M]) {
         // Protect against unwinding in C code.
         match std::panic::catch_unwind(|| {
             let u = unsafe { &mut *(user_data as *mut UserData<F, G>) };
@@ -286,7 +309,7 @@ where
         }) {
             Ok(()) => 0,
             Err(e) => {
-                eprintln!("sundials::CVode: function passed to .root() \
+                eprintln!("sundials::cvode::CVode: function passed to .root() \
                            panicked: {:?}", e);
                 std::process::abort() // Doesn't unwind
             }
@@ -328,9 +351,8 @@ pub enum CVStatus {
 /// Solver for stiff and nonstiff initial value problems for ODE systems.
 ///
 /// The generic parameters are as follows: `Ctx` is the type of the
-/// context, `V` is the type of vectors, `F` the type of the function
-/// being used as right-hand side of the ODE, and `G` is the type of
-/// the functions (if any) of which we want to seek roots.
+/// context, `V` is the type of vectors and `M` the number of
+/// functions we want to seek roots of.
 pub struct CVode<Ctx, V, F, G>
 where V: Vector {
     // One must take ownership of the context because it can only be
@@ -347,25 +369,22 @@ where V: Vector {
     user_data: UserData<F, G>,
 }
 
-// The user-data may be updated according to the type of `G`.
-// However, we must ensure that `f: F` is always extracted in the same
-// way because `cvrhs` may only be passed during initialization.
 #[repr(C)]
 struct UserData<F, G> {
     f: F, // Right-hand side of the equation
-    g: G, // Function whose roots we want to compute (if any)
+    g: G, // Function whose roots we want to compute (if any):
 }
 
 impl<V, F> CVode<(), V, F, ()>
-where V: Vector + Sized,
-      F: FnMut(f64, &V, &mut V)
+where V: Vector,
 {
     /// Solver using the Adams linear multistep method.  Recommended
     /// for non-stiff problems.
     // The fixed-point solver is recommended for nonstiff problems.
     pub fn adams<'a>(
         t0: f64, y0: &'a V, f: F
-    ) -> CVodeConf<'a, V, F, RootFn<V, 0>, 0> {
+    ) -> CVodeConf<'a, V, F, fn(f64, &V, &mut [f64; 0])>
+    where F: FnMut(f64, &V, &mut V) {
         CVodeConf::new("CVode::adams", CV_ADAMS, t0, y0, f)
     }
 
@@ -374,15 +393,15 @@ where V: Vector + Sized,
     // The default Newton iteration is recommended for stiff problems,
     pub fn bdf<'a>(
         t0: f64, y0: &'a V, f: F
-    ) -> CVodeConf<'a, V, F, RootFn<V, 0>, 0> {
+    ) -> CVodeConf<'a, V, F, fn(f64, &V, &mut [f64; 0])>
+    where F: FnMut(f64, &V, &mut V) {
         CVodeConf::new("CVode::bdf", CV_BDF, t0, y0, f)
     }
 }
 
 impl<Ctx, V, F, G> CVode<Ctx, V, F, G>
 where Ctx: Context,
-      V: Vector + Sized,
-      F: FnMut(f64, &V, &mut V)
+      V: Vector,
 {
     /// Return a reference to the [`Context`] the CVode solver was
     /// built with.
