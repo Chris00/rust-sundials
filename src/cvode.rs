@@ -185,7 +185,7 @@ where
         }
         // let n = V::len(y0);
         // SAFETY: Once `y0` has been passed to `CVodeInit`, it is
-        // copied to internal structures and thus can be freed.
+        // copied to internal structures and thus the original `y0` can move.
         let y0 = self.y0.borrow();
         let y0 =
             match unsafe { V::as_nvector(y0, ctx.as_ptr()) } {
@@ -197,7 +197,7 @@ where
             cvode_mem.0,
             Some(Self::cvrhs),
             self.t0,
-            V::as_ptr(&y0) as *mut _) };
+            y0 as *mut _) };
         if r == CV_MEM_FAIL {
             let msg = "a memory allocation request has failed";
             return Err(Error::Failure{name: self.name, msg})
@@ -214,7 +214,7 @@ where
         let linsolver = unsafe { LinSolver::spgmr(
             self.name,
             ctx.as_ptr(),
-            V::as_ptr(&y0) as *mut _)? };
+            y0 as *mut _)? };
         let r = unsafe { CVodeSetLinearSolver(
             cvode_mem.0, linsolver.as_ptr(), ptr::null_mut()) };
         if r != CVLS_SUCCESS as i32 {
@@ -448,8 +448,8 @@ where Ctx: Context,
     ) -> (f64, CVStatus) {
         self.update_user_data();
         // Safety: `yout` does not escape this function and so will
-        // not outlive `self.ctx`.
-        //let n = y.len();
+        // not outlive `self.ctx` and `y` will not move while `yout`
+        // is in use.
         let yout =
             match unsafe { V::as_mut_nvector(y, self.ctx.as_ptr()) }{
                 Some(yout) => yout,
@@ -460,7 +460,7 @@ where Ctx: Context,
         let r = unsafe { CVode(
             self.cvode_mem.0,
             t,
-            V::as_mut_ptr(&yout),
+            yout,
             &mut tret, itask) };
         let status = match r {
             CV_SUCCESS => CVStatus::Ok,
@@ -519,7 +519,7 @@ where Ctx: Context,
         // Reinitialize to allow any time `t`, even if not monotonic
         // w.r.t. previous calls.
         let ret = unsafe {
-            CVodeReInit(self.cvode_mem.0, t0, V::as_ptr(&y0) as *mut _)
+            CVodeReInit(self.cvode_mem.0, t0, y0 as *mut _)
         };
         if ret != CV_SUCCESS {
             panic!("CVodeReInit returned code {ret}.  Please report.");

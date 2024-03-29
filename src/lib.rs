@@ -27,7 +27,6 @@
 
 use std::{
     fmt::{self, Debug, Display, Formatter},
-    ops::Drop,
     ptr
 };
 use sundials_sys::*;
