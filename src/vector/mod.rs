@@ -58,9 +58,12 @@ pub unsafe trait Vector: Clone {
 
 /// Operations that Rust values must support to be used as vectors for
 /// this library.
+///
+/// These operations are declared as associate functions to reduce the
+/// possible name clash with methods.
 pub trait NVectorOps: Clone {
     /// Length of the vector.
-    fn len(&self) -> usize;
+    fn len(x: &Self) -> usize;
 
     /// Sets all components of `z` to `c`: ∀i, zᵢ = c.
     fn const_assign(z: &mut Self, c: f64);
@@ -274,7 +277,7 @@ impl<T: NVectorOps> Ops for T {
             nv: N_Vector, lrw: *mut sunindextype, liw: *mut sunindextype
         ) {
             let v = ref_of_nvector::<T>(nv);
-            let n = v.len();
+            let n = T::len(v);
             *lrw = n as sunindextype;
             *liw = 1;
         }
@@ -285,7 +288,7 @@ impl<T: NVectorOps> Ops for T {
             nv: N_Vector
         ) -> sunindextype {
             let v = ref_of_nvector::<T>(nv);
-            let n = v.len();
+            let n = T::len(v);
             n as sunindextype
         }
 
@@ -956,14 +959,14 @@ macro_rules! nvector_ops_for_iter { () => {
 
 impl<const N: usize> NVectorOps for [f64; N] {
     #[inline]
-    fn len(&self) -> usize { N }
+    fn len(_: &Self) -> usize { N }
 
     nvector_ops_for_iter!();
 }
 
 impl NVectorOps for Vec<f64> {
     #[inline]
-    fn len(&self) -> usize { Vec::len(&self) }
+    fn len(x: &Self) -> usize { Vec::len(x) }
 
     nvector_ops_for_iter!();
 }
@@ -977,37 +980,84 @@ impl NVectorOps for Vec<f64> {
 // `NVectorOps` (see below).
 
 impl NVectorOps for f64 {
-    fn len(&self) -> usize { 1 }
+    #[inline]
+    fn len(_: &Self) -> usize { 1 }
+
+    #[inline]
     fn const_assign(z: &mut Self, c: f64) { *z = c }
+
+    #[inline]
     fn abs_assign(z: &mut Self, x: &Self) { *z = x.abs() }
+
+    #[inline]
     fn mul_assign(z: &mut Self, x: &Self, y: &Self) { *z = x * y }
+
+    #[inline]
     fn inv_assign(z: &mut Self, x: &Self) { *z = 1. / x }
+
+    #[inline]
     fn inv(z: &mut Self) { *z = 1. / *z }
+
+    #[inline]
     fn div_assign(z: &mut Self, x: &Self, y: &Self) { *z = x / y }
+
+    #[inline]
     fn div(z: &mut Self, y: &Self) { *z = *z / y }
+
+    #[inline]
     fn inv_mul(z: &mut Self, x: &Self) { *z = x / *z }
+
+    #[inline]
     fn scale_assign(z: &mut Self, c: f64, x: &Self) { *z = c * x }
+
+    #[inline]
     fn scale(z: &mut Self, c: f64) { *z = c * *z }
+
+    #[inline]
     fn add_const_assign(z: &mut Self, x: &Self, b: f64) { *z = x + b }
+
+    #[inline]
     fn add_const(z: &mut Self, b: f64) { *z = *z + b }
+
+    #[inline]
     fn linear_sum_assign(z: &mut Self, a: f64, x: &Self, b: f64, y: &Self) {
         *z = a * x + b * y
     }
+
+    #[inline]
     fn linear_sum(z: &mut Self, a: f64, b: f64, y: &Self) {
         *z = a * *z + b * y
     }
+
+    #[inline]
     fn dot(x: &Self, y: &Self) -> f64 { x * y}
+
+    #[inline]
     fn max_norm(x: &Self) -> f64 { x.abs() }
+
+    #[inline]
     fn wrms_norm(x: &Self, w: &Self) -> f64 { (x * w).abs() }
+
+    #[inline]
     fn wrms_norm_mask(x: &Self, w: &Self, id: &Self) -> f64 {
         if *id > 0. { (x * w).abs() } else { 0. }
     }
+
+    #[inline]
     fn min(x: &Self) -> f64 { *x }
+
+    #[inline]
     fn wl2_norm(x: &Self, w: &Self) -> f64 { (x * w).abs() }
+
+    #[inline]
     fn l1_norm(x: &Self) -> f64 { x.abs() }
+
+    #[inline]
     fn compare_assign(z: &mut Self, c: f64, x: &Self) {
         if x.abs() >= c { *z = 1. } else { *z = 0. }
     }
+
+    #[inline]
     fn inv_test_assign(z: &mut Self, x: &Self) -> bool {
         if *x != 0. {
             *z = 1. / x;
@@ -1016,6 +1066,8 @@ impl NVectorOps for f64 {
             false
         }
     }
+
+    #[inline]
     fn constr_mask_assign(m: &mut Self, c: &Self, x: &Self) -> bool {
         let test = if *c == 2. {
             *x > 0.
@@ -1031,9 +1083,182 @@ impl NVectorOps for f64 {
         *m = if test { 0. } else { 1. };
         test
     }
+
+    #[inline]
     fn min_quotient(num: &Self, denom: &Self) -> f64 {
         if *denom == 0. { f64::MAX } else { num / denom }
     }
 }
 
+////////////////////////////////////////////////////////////////////////
+//
+// Implementation for products
+
+impl<U, V> NVectorOps for (U, V)
+where
+    U: NVectorOps,
+    V: NVectorOps,
+{
+    #[inline]
+    fn len((x1, x2): &Self) -> usize { U::len(x1) + V::len(x2) }
+
+    #[inline]
+    fn const_assign((z1, z2): &mut Self, c: f64) {
+        U::const_assign(z1, c);
+        V::const_assign(z2, c);
+    }
+
+    #[inline]
+    fn abs_assign((z1, z2): &mut Self, (x1, x2): &Self) {
+        U::abs_assign(z1, x1);
+        V::abs_assign(z2, x2);
+    }
+
+    #[inline]
+    fn mul_assign((z1, z2): &mut Self, (x1, x2): &Self, (y1, y2): &Self) {
+        U::mul_assign(z1, x1, y1);
+        V::mul_assign(z2, x2, y2);
+    }
+
+    #[inline]
+    fn inv_assign((z1, z2): &mut Self, (x1, x2): &Self) {
+        U::inv_assign(z1, x1);
+        V::inv_assign(z2, x2);
+    }
+
+    #[inline]
+    fn inv((z1, z2): &mut Self) {
+        U::inv(z1);
+        V::inv(z2);
+    }
+
+    #[inline]
+    fn div_assign((z1, z2): &mut Self, (x1, x2): &Self, (y1, y2): &Self) {
+        U::div_assign(z1, x1, y1);
+        V::div_assign(z2, x2, y2);
+    }
+
+    #[inline]
+    fn div((z1, z2): &mut Self, (y1, y2): &Self) {
+        U::div(z1, y1);
+        V::div(z2, y2);
+    }
+
+    #[inline]
+    fn inv_mul((z1, z2): &mut Self, (x1, x2): &Self) {
+        U::inv_mul(z1, x1);
+        V::inv_mul(z2, x2);
+    }
+
+    #[inline]
+    fn scale_assign((z1, z2): &mut Self, c: f64, (x1, x2): &Self) {
+        U::scale_assign(z1, c, x1);
+        V::scale_assign(z2, c, x2);
+    }
+
+    #[inline]
+    fn scale((z1, z2): &mut Self, c: f64) {
+        U::scale(z1, c);
+        V::scale(z2, c);
+    }
+
+    #[inline]
+    fn add_const_assign((z1, z2): &mut Self, (x1, x2): &Self, b: f64) {
+        U::add_const_assign(z1, x1, b);
+        V::add_const_assign(z2, x2, b);
+    }
+
+    #[inline]
+    fn add_const((z1, z2): &mut Self, b: f64) {
+        U::add_const(z1, b);
+        V::add_const(z2, b);
+    }
+
+    #[inline]
+    fn linear_sum_assign(
+        (z1, z2): &mut Self, a: f64, (x1, x2): &Self, b: f64, (y1, y2): &Self
+    ) {
+        U::linear_sum_assign(z1, a, x1, b, y1);
+        V::linear_sum_assign(z2, a, x2, b, y2);
+    }
+
+    #[inline]
+    fn linear_sum((z1, z2): &mut Self, a: f64, b: f64, (y1, y2): &Self) {
+        U::linear_sum(z1, a, b, y1);
+        V::linear_sum(z2, a, b, y2);
+    }
+
+    #[inline]
+    fn dot((x1, x2): &Self, (y1, y2): &Self) -> f64 {
+        U::dot(x1, y1) + V::dot(x2, y2)
+    }
+
+    #[inline]
+    fn max_norm((x1, x2): &Self) -> f64 {
+        U::max_norm(x1).max(V::max_norm(x2))
+    }
+
+    #[inline]
+    fn wrms_norm((x1, x2): &Self, (w1, w2): &Self) -> f64 {
+        let n1 = U::len(x1) as f64;
+        let n2 = V::len(x2) as f64;
+        let n = n1 + n2;
+        // FIXME: avoid possible overflow in intermediate computations.
+        (U::wrms_norm(x1, w1).powi(2) * (n1 / n)
+            + V::wrms_norm(x2, w2).powi(2) * (n2 / n)).sqrt()
+    }
+
+    #[inline]
+    fn wrms_norm_mask(
+        (x1, x2): &Self, (w1, w2): &Self, (id1, id2): &Self
+    ) -> f64 {
+        let n1 = U::len(x1) as f64;
+        let n2 = V::len(x2) as f64;
+        let n = n1 + n2;
+        // FIXME: avoid possible overflow in intermediate computations.
+        (U::wrms_norm_mask(x1, w1, id1).powi(2) * (n1 / n)
+            + V::wrms_norm_mask(x2, w2, id2).powi(2) * (n2 / n)).sqrt()
+    }
+
+    #[inline]
+    fn min((x1, x2): &Self) -> f64 {
+        U::min(x1).min(V::min(x2))
+    }
+
+    #[inline]
+    fn wl2_norm((x1, x2): &Self, (w1, w2): &Self) -> f64 {
+        // FIXME: avoid possible overflow in intermediate computations.
+        (U::wl2_norm(x1, w1).powi(2) + V::wl2_norm(x2, w2).powi(2)).sqrt()
+    }
+
+    #[inline]
+    fn l1_norm((x1, x2): &Self) -> f64 {
+        U::l1_norm(x1) + V::l1_norm(x2)
+    }
+
+    #[inline]
+    fn compare_assign((z1, z2): &mut Self, c: f64, (x1, x2): &Self) {
+        U::compare_assign(z1, c, x1);
+        V::compare_assign(z2, c, x2);
+    }
+
+    #[inline]
+    fn inv_test_assign((z1, z2): &mut Self, (x1, x2): &Self) -> bool {
+        U::inv_test_assign(z1, x1) && V::inv_test_assign(z2, x2)
+    }
+
+    #[inline]
+    fn constr_mask_assign(
+        (m1, m2): &mut Self, (c1, c2): &Self, (x1, x2): &Self
+    ) -> bool {
+        U::constr_mask_assign(m1, c1, x1)
+        && V::constr_mask_assign(m2, c2, x2)
+    }
+
+    #[inline]
+    fn min_quotient((num1, num2): &Self, (denom1, denom2): &Self) -> f64 {
+        U::min_quotient(num1, denom1).min(V::min_quotient(num2, denom2))
+    }
 }
+
+
