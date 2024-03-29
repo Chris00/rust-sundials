@@ -4,7 +4,7 @@
 //! equation s̲olvers.
 //!
 //!
-//! # Example
+//! # Examples
 //!
 //! The following code solves the equation ∂ₜu = f(t,u) where f is the
 //! function (t,u) ↦ 1 using Adams' method.
@@ -19,7 +19,23 @@
 //! # Ok(()) }
 //! ```
 //!
+//! Here is a second example using [`array`]s to specify the equation
+//! ∂ₜ(u₀, u₁) = (-u₁, u₀).
 //!
+//! ```
+//! use std::f64::consts::PI;
+//! use sundials::{context, cvode::CVode};
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let mut ode = CVode::adams(0., &[1., 0.], |t, &[u0, u1], du| {
+//!         *du = [-u1, u0]
+//!     })
+//!     .build(context!(Rot)?)?;
+//! let mut u = [f64::NAN; 2];
+//! ode.solve(0.5 * PI, &mut u);
+//! assert!(u[0].abs() < 1e-6);
+//! assert!((u[1] - 1.).abs() < 1e-6);
+//! # Ok(()) }
+//! ```
 //!
 //! [Sundials]: https://computing.llnl.gov/projects/sundials
 

@@ -8,7 +8,8 @@ pub mod serial;
 /// Trait implemented by types that are considered vectors by this
 /// library.  This trait is implemented by all rust values that
 /// satisfy [`NVectorOps`] as well as Sundials vector types (see the
-/// sub-modules).
+/// sub-modules).  In particular `[f64; N]`, `Vec<f64>` and `f64`
+/// can be used as vectors out of the box.
 ///
 /// # Safety
 /// It is very unlikely that you need to implement this trait.  Its
