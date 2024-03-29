@@ -556,12 +556,12 @@ mod tests {
 
     #[test]
     fn cvode_exp() {
-        let mut ode = CVode::adams(0., &[1.],
+        let mut ode = CVode::adams(0., &1.,
             |_,u, du| *du = *u)
             .build(context!().unwrap()).unwrap();
-        let mut u1 = [f64::NAN];
+        let mut u1 = f64::NAN;
         ode.solve(1., &mut u1);
-        assert_eq_tol!(u1[0], 1f64.exp(), 1e-5);
+        assert_eq_tol!(u1, 1f64.exp(), 1e-5);
     }
 
     #[test]

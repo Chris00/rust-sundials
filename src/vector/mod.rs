@@ -967,4 +967,72 @@ impl NVectorOps for Vec<f64> {
     nvector_ops_for_iter!();
 }
 
+////////////////////////////////////////////////////////////////////////
+//
+// Implementation for f64
+//
+// The main purpose if this is not to ease the treatment of 1D ODEs
+// but to enable products of `f64` and other types implementing
+// `NVectorOps` (see below).
+
+impl NVectorOps for f64 {
+    fn len(&self) -> usize { 1 }
+    fn const_assign(z: &mut Self, c: f64) { *z = c }
+    fn abs_assign(z: &mut Self, x: &Self) { *z = x.abs() }
+    fn mul_assign(z: &mut Self, x: &Self, y: &Self) { *z = x * y }
+    fn inv_assign(z: &mut Self, x: &Self) { *z = 1. / x }
+    fn inv(z: &mut Self) { *z = 1. / *z }
+    fn div_assign(z: &mut Self, x: &Self, y: &Self) { *z = x / y }
+    fn div(z: &mut Self, y: &Self) { *z = *z / y }
+    fn inv_mul(z: &mut Self, x: &Self) { *z = x / *z }
+    fn scale_assign(z: &mut Self, c: f64, x: &Self) { *z = c * x }
+    fn scale(z: &mut Self, c: f64) { *z = c * *z }
+    fn add_const_assign(z: &mut Self, x: &Self, b: f64) { *z = x + b }
+    fn add_const(z: &mut Self, b: f64) { *z = *z + b }
+    fn linear_sum_assign(z: &mut Self, a: f64, x: &Self, b: f64, y: &Self) {
+        *z = a * x + b * y
+    }
+    fn linear_sum(z: &mut Self, a: f64, b: f64, y: &Self) {
+        *z = a * *z + b * y
+    }
+    fn dot(x: &Self, y: &Self) -> f64 { x * y}
+    fn max_norm(x: &Self) -> f64 { x.abs() }
+    fn wrms_norm(x: &Self, w: &Self) -> f64 { (x * w).abs() }
+    fn wrms_norm_mask(x: &Self, w: &Self, id: &Self) -> f64 {
+        if *id > 0. { (x * w).abs() } else { 0. }
+    }
+    fn min(x: &Self) -> f64 { *x }
+    fn wl2_norm(x: &Self, w: &Self) -> f64 { (x * w).abs() }
+    fn l1_norm(x: &Self) -> f64 { x.abs() }
+    fn compare_assign(z: &mut Self, c: f64, x: &Self) {
+        if x.abs() >= c { *z = 1. } else { *z = 0. }
+    }
+    fn inv_test_assign(z: &mut Self, x: &Self) -> bool {
+        if *x != 0. {
+            *z = 1. / x;
+            true
+        } else {
+            false
+        }
+    }
+    fn constr_mask_assign(m: &mut Self, c: &Self, x: &Self) -> bool {
+        let test = if *c == 2. {
+            *x > 0.
+        } else if *c == 1. {
+            *x >= 0.
+        } else if *c == -2. {
+            *x < 0.
+        } else if *c == -1. {
+            *x <= 0.
+        } else { // no constraint
+            true
+        };
+        *m = if test { 0. } else { 1. };
+        test
+    }
+    fn min_quotient(num: &Self, denom: &Self) -> f64 {
+        if *denom == 0. { f64::MAX } else { num / denom }
+    }
+}
+
 }
