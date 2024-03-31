@@ -1354,3 +1354,13 @@ impl_tuple!(x1, y1, z1, t1, T1, x2, y2, z2, t2, T2, x3, y3, z3, t3, T3,
 
 
 
+////////////////////////////////////////////////////////////////////////
+//
+// Implementation for ndarray
+
+#[cfg(feature = "ndarray")]
+impl NVectorOps for ndarray::Array1<f64> {
+    fn len(v: &Self) -> usize { ndarray::Array1::len(v) }
+
+    nvector_ops_for_iter!();
+}
