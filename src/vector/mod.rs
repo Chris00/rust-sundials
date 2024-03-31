@@ -1092,173 +1092,265 @@ impl NVectorOps for f64 {
 
 ////////////////////////////////////////////////////////////////////////
 //
-// Implementation for products
+// Implementation for tuples
 
-impl<U, V> NVectorOps for (U, V)
-where
-    U: NVectorOps,
-    V: NVectorOps,
+macro_rules! impl_tuple {
+    ($x1: ident, $y1: ident, $z1: ident, $t1: ident, $ty1: ident,
+        $($x: ident, $y: ident, $z: ident, $t: ident, $ty: ident),*) =>
 {
-    #[inline]
-    fn len((x1, x2): &Self) -> usize { U::len(x1) + V::len(x2) }
+    impl<$ty1, $($ty),*> NVectorOps for ($ty1, $($ty),*)
+    where $ty1: NVectorOps, $($ty: NVectorOps),* {
+        #[inline]
+        fn len(($x1, $($x),*): &Self) -> usize {
+            $ty1::len($x1) $(+ $ty::len($x))*
+        }
 
-    #[inline]
-    fn const_assign((z1, z2): &mut Self, c: f64) {
-        U::const_assign(z1, c);
-        V::const_assign(z2, c);
-    }
+        #[inline]
+        fn const_assign(($z1, $($z),*): &mut Self, c: f64) {
+            $ty1::const_assign($z1, c);
+            $($ty::const_assign($z, c);)*
+        }
 
-    #[inline]
-    fn abs_assign((z1, z2): &mut Self, (x1, x2): &Self) {
-        U::abs_assign(z1, x1);
-        V::abs_assign(z2, x2);
-    }
+        #[inline]
+        fn abs_assign(($z1, $($z),*): &mut Self, ($x1, $($x),*): &Self) {
+            $ty1::abs_assign($z1, $x1);
+            $($ty::abs_assign($z, $x);)*
+        }
 
-    #[inline]
-    fn mul_assign((z1, z2): &mut Self, (x1, x2): &Self, (y1, y2): &Self) {
-        U::mul_assign(z1, x1, y1);
-        V::mul_assign(z2, x2, y2);
-    }
+        #[inline]
+        fn mul_assign(
+            ($z1, $($z),*): &mut Self,
+            ($x1, $($x),*): &Self,
+            ($y1, $($y),*): &Self
+        ) {
+            $ty1::mul_assign($z1, $x1, $y1);
+            $($ty::mul_assign($z, $x, $y);)*
+        }
 
-    #[inline]
-    fn inv_assign((z1, z2): &mut Self, (x1, x2): &Self) {
-        U::inv_assign(z1, x1);
-        V::inv_assign(z2, x2);
-    }
+        #[inline]
+        fn inv_assign(($z1, $($z),*): &mut Self, ($x1, $($x),*): &Self) {
+            $ty1::inv_assign($z1, $x1);
+            $($ty::inv_assign($z, $x);)*
+        }
 
-    #[inline]
-    fn inv((z1, z2): &mut Self) {
-        U::inv(z1);
-        V::inv(z2);
-    }
+        #[inline]
+        fn inv(($z1, $($z),*): &mut Self) {
+            $ty1::inv($z1);
+            $($ty::inv($z);)*
+        }
 
-    #[inline]
-    fn div_assign((z1, z2): &mut Self, (x1, x2): &Self, (y1, y2): &Self) {
-        U::div_assign(z1, x1, y1);
-        V::div_assign(z2, x2, y2);
-    }
+        #[inline]
+        fn div_assign(
+            ($z1, $($z),*): &mut Self,
+            ($x1, $($x),*): &Self,
+            ($y1, $($y),*): &Self
+        ) {
+            $ty1::div_assign($z1, $x1, $y1);
+            $($ty::div_assign($z, $x, $y);)*
 
-    #[inline]
-    fn div((z1, z2): &mut Self, (y1, y2): &Self) {
-        U::div(z1, y1);
-        V::div(z2, y2);
-    }
+        }
 
-    #[inline]
-    fn inv_mul((z1, z2): &mut Self, (x1, x2): &Self) {
-        U::inv_mul(z1, x1);
-        V::inv_mul(z2, x2);
-    }
+        #[inline]
+        fn div(($z1, $($z),*): &mut Self, ($y1, $($y),*): &Self) {
+            $ty1::div($z1, $y1);
+            $($ty::div($z, $y);)*
+        }
 
-    #[inline]
-    fn scale_assign((z1, z2): &mut Self, c: f64, (x1, x2): &Self) {
-        U::scale_assign(z1, c, x1);
-        V::scale_assign(z2, c, x2);
-    }
+        #[inline]
+        fn inv_mul(($z1, $($z),*): &mut Self, ($x1, $($x),*): &Self) {
+            $ty1::inv_mul($z1, $x1);
+            $($ty::inv_mul($z, $x);)*
+        }
 
-    #[inline]
-    fn scale((z1, z2): &mut Self, c: f64) {
-        U::scale(z1, c);
-        V::scale(z2, c);
-    }
+        #[inline]
+        fn scale_assign(
+            ($z1, $($z),*): &mut Self,
+            c: f64,
+            ($x1, $($x),*): &Self
+        ) {
+            $ty1::scale_assign($z1, c, $x1);
+            $($ty::scale_assign($z, c, $x);)*
+        }
 
-    #[inline]
-    fn add_const_assign((z1, z2): &mut Self, (x1, x2): &Self, b: f64) {
-        U::add_const_assign(z1, x1, b);
-        V::add_const_assign(z2, x2, b);
-    }
+        #[inline]
+        fn scale(($z1, $($z),*): &mut Self, c: f64) {
+            $ty1::scale($z1, c);
+            $($ty::scale($z, c);)*
+        }
 
-    #[inline]
-    fn add_const((z1, z2): &mut Self, b: f64) {
-        U::add_const(z1, b);
-        V::add_const(z2, b);
-    }
+        #[inline]
+        fn add_const_assign(
+            ($z1, $($z),*): &mut Self,
+            ($x1, $($x),*): &Self,
+            b: f64
+        ) {
+            $ty1::add_const_assign($z1, $x1, b);
+            $($ty::add_const_assign($z, $x, b);)*
+        }
 
-    #[inline]
-    fn linear_sum_assign(
-        (z1, z2): &mut Self, a: f64, (x1, x2): &Self, b: f64, (y1, y2): &Self
-    ) {
-        U::linear_sum_assign(z1, a, x1, b, y1);
-        V::linear_sum_assign(z2, a, x2, b, y2);
-    }
+        #[inline]
+        fn add_const(($z1, $($z),*): &mut Self, b: f64) {
+            $ty1::add_const($z1, b);
+            $($ty::add_const($z, b);)*
+        }
 
-    #[inline]
-    fn linear_sum((z1, z2): &mut Self, a: f64, b: f64, (y1, y2): &Self) {
-        U::linear_sum(z1, a, b, y1);
-        V::linear_sum(z2, a, b, y2);
-    }
+        #[inline]
+        fn linear_sum_assign(
+            ($z1, $($z),*): &mut Self,
+            a: f64,  ($x1, $($x),*): &Self,
+            b: f64,  ($y1, $($y),*): &Self
+        ) {
+            $ty1::linear_sum_assign($z1, a, $x1, b, $y1);
+            $($ty::linear_sum_assign($z, a, $x, b, $y);)*
+        }
 
-    #[inline]
-    fn dot((x1, x2): &Self, (y1, y2): &Self) -> f64 {
-        U::dot(x1, y1) + V::dot(x2, y2)
-    }
+        #[inline]
+        fn linear_sum(
+            ($z1, $($z),*): &mut Self,
+            a: f64, b: f64,
+            ($y1, $($y),*): &Self
+        ) {
+            $ty1::linear_sum($z1, a, b, $y1);
+            $($ty::linear_sum($z, a, b, $y);)*
+        }
 
-    #[inline]
-    fn max_norm((x1, x2): &Self) -> f64 {
-        U::max_norm(x1).max(V::max_norm(x2))
-    }
+        #[inline]
+        fn dot(($x1, $($x),*): &Self, ($y1, $($y),*): &Self) -> f64 {
+            $ty1::dot($x1, $y1) $(+ $ty::dot($x, $y))*
+        }
 
-    #[inline]
-    fn wrms_norm((x1, x2): &Self, (w1, w2): &Self) -> f64 {
-        let n1 = U::len(x1) as f64;
-        let n2 = V::len(x2) as f64;
-        let n = n1 + n2;
-        // FIXME: avoid possible overflow in intermediate computations.
-        (U::wrms_norm(x1, w1).powi(2) * (n1 / n)
-            + V::wrms_norm(x2, w2).powi(2) * (n2 / n)).sqrt()
-    }
+        #[inline]
+        fn max_norm(($x1, $($x),*): &Self) -> f64 {
+            $ty1::max_norm($x1)
+            $(.max($ty::max_norm($x)))*
+        }
 
-    #[inline]
-    fn wrms_norm_mask(
-        (x1, x2): &Self, (w1, w2): &Self, (id1, id2): &Self
-    ) -> f64 {
-        let n1 = U::len(x1) as f64;
-        let n2 = V::len(x2) as f64;
-        let n = n1 + n2;
-        // FIXME: avoid possible overflow in intermediate computations.
-        (U::wrms_norm_mask(x1, w1, id1).powi(2) * (n1 / n)
-            + V::wrms_norm_mask(x2, w2, id2).powi(2) * (n2 / n)).sqrt()
-    }
+        #[inline]
+        fn wrms_norm(
+            ($x1, $($x),*): &Self,
+            ($y1, $($y),*): &Self, // (w1, w2,...)
+        ) -> f64 {
+            let $t1 = $ty1::len($x1);
+            $(let $t = $ty::len($x);)*
+            let n = ($t1 $(+ $t)*) as f64;
+            // FIXME: avoid possible overflow in intermediate computations.
+            ($ty1::wrms_norm($x1, $y1).powi(2) * ($t1 as f64/ n)
+                $(+ $ty::wrms_norm($x, $y).powi(2) * ($t as f64/ n))*).sqrt()
+        }
 
-    #[inline]
-    fn min((x1, x2): &Self) -> f64 {
-        U::min(x1).min(V::min(x2))
-    }
+        #[inline]
+        fn wrms_norm_mask(
+            ($x1, $($x),*): &Self,
+            ($y1, $($y),*): &Self, // (w1, w2,...)
+            ($z1, $($z),*): &Self, // (id1, id2,...)
+        ) -> f64 {
+            let $t1 = $ty1::len($x1);
+            $(let $t = $ty::len($x);)*
+            let n = ($t1 $(+ $t)*) as f64;
+            // FIXME: avoid possible overflow in intermediate computations.
+            ($ty1::wrms_norm_mask($x1, $y1, $z1).powi(2) * $t1 as f64 / n
+                $(+ $ty::wrms_norm_mask($x, $y, $z).powi(2)
+                    * $t as f64 / n)*).sqrt()
+        }
 
-    #[inline]
-    fn wl2_norm((x1, x2): &Self, (w1, w2): &Self) -> f64 {
-        // FIXME: avoid possible overflow in intermediate computations.
-        (U::wl2_norm(x1, w1).powi(2) + V::wl2_norm(x2, w2).powi(2)).sqrt()
-    }
+        #[inline]
+        fn min(($x1, $($x),*): &Self) -> f64 {
+            $ty1::min($x1) $(.min($ty::min($x)))*
+        }
 
-    #[inline]
-    fn l1_norm((x1, x2): &Self) -> f64 {
-        U::l1_norm(x1) + V::l1_norm(x2)
-    }
+        #[inline]
+        fn wl2_norm(
+            ($x1, $($x),*): &Self,
+            ($y1, $($y),*): &Self // (w1, w2,...)
+        ) -> f64 {
+            // FIXME: Better implementation based on hypot impl?
+            $ty1::wl2_norm($x1, $y1)
+            $(.hypot($ty::wl2_norm($x, $y)))*
+        }
 
-    #[inline]
-    fn compare_assign((z1, z2): &mut Self, c: f64, (x1, x2): &Self) {
-        U::compare_assign(z1, c, x1);
-        V::compare_assign(z2, c, x2);
-    }
+        #[inline]
+        fn l1_norm(($x1, $($x),*): &Self) -> f64 {
+            $ty1::l1_norm($x1) $(+ $ty::l1_norm($x))*
+        }
 
-    #[inline]
-    fn inv_test_assign((z1, z2): &mut Self, (x1, x2): &Self) -> bool {
-        U::inv_test_assign(z1, x1) && V::inv_test_assign(z2, x2)
-    }
+        #[inline]
+        fn compare_assign(
+            ($z1, $($z),*): &mut Self,
+            c: f64,
+            ($x1, $($x),*): &Self
+        ) {
+            $ty1::compare_assign($z1, c, $x1);
+            $($ty::compare_assign($z, c, $x);)*
+        }
 
-    #[inline]
-    fn constr_mask_assign(
-        (m1, m2): &mut Self, (c1, c2): &Self, (x1, x2): &Self
-    ) -> bool {
-        U::constr_mask_assign(m1, c1, x1)
-        && V::constr_mask_assign(m2, c2, x2)
-    }
+        #[inline]
+        fn inv_test_assign(
+            ($z1, $($z),*): &mut Self,
+            ($x1, $($x),*): &Self,
+        ) -> bool {
+            // Beware that the assignation must occur even if some test fails.
+            let $t1 = $ty1::inv_test_assign($z1, $x1);
+            $(let $t = $ty::inv_test_assign($z, $x);)*
+            $t1 $(&& $t)*
+        }
 
-    #[inline]
-    fn min_quotient((num1, num2): &Self, (denom1, denom2): &Self) -> f64 {
-        U::min_quotient(num1, denom1).min(V::min_quotient(num2, denom2))
+        #[inline]
+        fn constr_mask_assign(
+            ($y1, $($y),*): &mut Self, // (m1, m2,...)
+            ($z1, $($z),*): &Self, // (c1, c2,...)
+            ($x1, $($x),*): &Self,
+        ) -> bool {
+            // Beware that the assignation must occur even if some test fails.
+            let $t1 = $ty1::constr_mask_assign($y1, $z1, $x1);
+            $(let $t = $ty::constr_mask_assign($y, $z, $x);)*
+            $t1 $(&& $t)*
+        }
+
+        #[inline]
+        fn min_quotient(
+            ($x1, $($x),*): &Self, // (num1, num2,...)
+            ($y1, $($y),*): &Self, // (denom1, denom2,...)
+        ) -> f64 {
+            $ty1::min_quotient($x1, $y1)
+            $(.min($ty::min_quotient($x, $y)))*
+        }
     }
-}
+}}
+
+impl_tuple!(x1, y1, z1, t1, T1, x2, y2, z2, t2, T2);
+impl_tuple!(x1, y1, z1, t1, T1, x2, y2, z2, t2, T2, x3, y3, z3, t3, T3);
+impl_tuple!(x1, y1, z1, t1, T1, x2, y2, z2, t2, T2, x3, y3, z3, t3, T3,
+    x4, y4, z4, t4, T4);
+impl_tuple!(x1, y1, z1, t1, T1, x2, y2, z2, t2, T2, x3, y3, z3, t3, T3,
+    x4, y4, z4, t4, T4, x5, y5, z5, t5, T5);
+impl_tuple!(x1, y1, z1, t1, T1, x2, y2, z2, t2, T2, x3, y3, z3, t3, T3,
+    x4, y4, z4, t4, T4, x5, y5, z5, t5, T5, x6, y6, z6, t6, T6);
+impl_tuple!(x1, y1, z1, t1, T1, x2, y2, z2, t2, T2, x3, y3, z3, t3, T3,
+    x4, y4, z4, t4, T4, x5, y5, z5, t5, T5, x6, y6, z6, t6, T6,
+    x7, y7, z7, t7, T7);
+impl_tuple!(x1, y1, z1, t1, T1, x2, y2, z2, t2, T2, x3, y3, z3, t3, T3,
+    x4, y4, z4, t4, T4, x5, y5, z5, t5, T5, x6, y6, z6, t6, T6,
+    x7, y7, z7, t7, T7, x8, y8, z8, t8, T8);
+impl_tuple!(x1, y1, z1, t1, T1, x2, y2, z2, t2, T2, x3, y3, z3, t3, T3,
+    x4, y4, z4, t4, T4, x5, y5, z5, t5, T5, x6, y6, z6, t6, T6,
+    x7, y7, z7, t7, T7, x8, y8, z8, t8, T8, x9, y9, z9, t9, T9);
+impl_tuple!(x1, y1, z1, t1, T1, x2, y2, z2, t2, T2, x3, y3, z3, t3, T3,
+    x4, y4, z4, t4, T4, x5, y5, z5, t5, T5, x6, y6, z6, t6, T6,
+    x7, y7, z7, t7, T7, x8, y8, z8, t8, T8, x9, y9, z9, t9, T9,
+    x10, y10, z10, t10, T10);
+impl_tuple!(x1, y1, z1, t1, T1, x2, y2, z2, t2, T2, x3, y3, z3, t3, T3,
+    x4, y4, z4, t4, T4, x5, y5, z5, t5, T5, x6, y6, z6, t6, T6,
+    x7, y7, z7, t7, T7, x8, y8, z8, t8, T8, x9, y9, z9, t9, T9,
+    x10, y10, z10, t10, T10, x11, y11, z11, t11, T11);
+impl_tuple!(x1, y1, z1, t1, T1, x2, y2, z2, t2, T2, x3, y3, z3, t3, T3,
+    x4, y4, z4, t4, T4, x5, y5, z5, t5, T5, x6, y6, z6, t6, T6,
+    x7, y7, z7, t7, T7, x8, y8, z8, t8, T8, x9, y9, z9, t9, T9,
+    x10, y10, z10, t10, T10, x11, y11, z11, t11, T11, x12, y12, z12, t12, T12);
+impl_tuple!(x1, y1, z1, t1, T1, x2, y2, z2, t2, T2, x3, y3, z3, t3, T3,
+    x4, y4, z4, t4, T4, x5, y5, z5, t5, T5, x6, y6, z6, t6, T6,
+    x7, y7, z7, t7, T7, x8, y8, z8, t8, T8, x9, y9, z9, t9, T9,
+    x10, y10, z10, t10, T10, x11, y11, z11, t11, T11, x12, y12, z12, t12, T12,
+    x13, y13, z13, t13, T13);
+
 
 
