@@ -52,7 +52,9 @@ jobs:
     - run: git submodule update
     - name: Install Ubuntu packages
       if: startsWith(matrix.os, 'ubuntu')
-      run: sudo apt-get -y install libsundials-dev
+      run: |
+        sudo apt-get update
+        sudo apt-get -y install libsundials-dev
     - name: Set up vcpkg on Windows
       if: startsWith(matrix.os, 'windows')
       run: |
