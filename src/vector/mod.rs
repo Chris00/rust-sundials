@@ -1,4 +1,4 @@
-//! Vectors
+//! Generic vector trait and its implementations.
 
 use std::ffi::c_void;
 use sundials_sys::*;
@@ -8,8 +8,12 @@ pub mod serial;
 /// Trait implemented by types that are considered vectors by this
 /// library.  This trait is implemented by all rust values that
 /// satisfy [`NVectorOps`] as well as Sundials vector types (see the
-/// sub-modules).  In particular `[f64; N]`, `Vec<f64>` and `f64`
-/// can be used as vectors out of the box.
+/// sub-modules).  In particular `[f64; N]`, `Vec<f64>` and `f64` and
+/// `ndarray::Array1<f64>` (activating the feature "ndarray") can be
+/// used as vectors out of the box.  Moreover, if `T1`, `T2`,
+/// `T3`,... are types considered as vectors (more specifically, they
+/// implement [`NVectorOps`]), then `(T1, T2)`,
+/// `(T1, T2, T3)`,... also do.
 ///
 /// # Safety
 /// It is very unlikely that you need to implement this trait.  Its

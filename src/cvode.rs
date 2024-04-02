@@ -136,6 +136,10 @@ where
     ///
     /// # Example
     ///
+    /// The following code solves u'' = -1 with initial conditions
+    /// u(0) = 0 and u'(0) = 1 (whose solution is u(t) = t - t²/2)
+    /// stopping if a root of u is found.
+    ///
     /// ```
     /// use sundials::{context, cvode::{CVode, CVStatus}};
     /// let mut ode = CVode::adams(0., &[0., 1.], |_t, y, dy| {
@@ -439,6 +443,8 @@ where Ctx: Context,
 
     /// Same as [`CVode::solve`] but only perform one time step in the
     /// direction of `t`.
+    ///
+    /// See [`solve`][Self::solve] for more information on the return value.
     pub fn step(&mut self, t: f64, y: &mut V) -> (f64, CVStatus) {
         Self::integrate(self, t, y, CV_ONE_STEP)
     }
