@@ -191,6 +191,7 @@ where
         // SAFETY: Once `y0` has been passed to `CVodeInit`, it is
         // copied to internal structures and thus the original `y0` can move.
         let y0 = self.y0.borrow();
+        let len = V::len(y0);
         let y0 =
             match unsafe { V::as_nvector(y0, ctx.as_ptr()) } {
                 Some(y0) => y0,
@@ -272,7 +273,7 @@ where
         }
         Ok(CVode {
             ctx,  cvode_mem,
-            t0: self.t0,  vec: PhantomData,
+            t0: self.t0,  len,  vec: PhantomData,
             _matrix: None,  _linsolver: Some(linsolver),
             rootsfound,
             user_data: UserData { f: self.f, g: self.g }
@@ -364,6 +365,7 @@ where V: Vector {
     ctx: Ctx,
     cvode_mem: CVodeMem,
     t0: f64,
+    len: usize, // length of vectors
     vec: PhantomData<V>,
     // We hold `Matrix` and `LinSolver` so they are freed when `CVode`
     // is dropped.
@@ -431,13 +433,18 @@ where Ctx: Context,
 
     /// Set `y` to the solution at time `t`.
     ///
-    /// If this function returns [`CVStatus::IllInput`], it means that
+    /// If this function returns [`CVStatus::IllInput`], it means that:
     /// - `t` was not monotonic w.r.t. previous calls.
     /// - A component of the error weight vector became zero during
     ///   internal time-stepping.
     /// - A root of one of the root functions was found both at a point `t`
     ///   and also very near `t`.
+    /// - The length of `y` is different from the length `self` was
+    ///   initialized with.
     pub fn solve(&mut self, t: f64, y: &mut V) -> CVStatus {
+        if V::len(y) != self.len {
+            return CVStatus::IllInput
+        }
         Self::integrate(self, t, y, CV_NORMAL).1
     }
 
@@ -446,6 +453,9 @@ where Ctx: Context,
     ///
     /// See [`solve`][Self::solve] for more information on the return value.
     pub fn step(&mut self, t: f64, y: &mut V) -> (f64, CVStatus) {
+        if V::len(y) != self.len {
+            return (t, CVStatus::IllInput)
+        }
         Self::integrate(self, t, y, CV_ONE_STEP)
     }
 
@@ -511,8 +521,10 @@ where Ctx: Context,
     /// Return the solution with initial conditions (`t0`, `y0`) at
     /// time `t`.  This is a convenience function.
     pub fn cauchy(&mut self, t0: f64, y0: &V, t: f64) -> (V, CVStatus) {
-        // FIXME: should we check the dim of `y0`?
         let mut y = y0.clone();
+        if V::len(&y) != self.len {
+            return (y, CVStatus::IllInput)
+        }
         // Avoid CVStatus::TooClose
         if t == t0 {
             return (y, CVStatus::Ok)
