@@ -78,5 +78,5 @@ int main() {
 
 
 /* Local Variables: */
-/* compile-command: "gcc -O3 speed.c -o /tmp/speed -lsundials_generic -lsundials_nvecserial -lsundials_cvode -lsundials_sunmatrixdense -lsundials_sunlinsoldense -lsundials_sunlinsolspgmr" */
+/* compile-command: "gcc -O3 speed.c -o ../target/speed_c -lsundials_generic -lsundials_nvecserial -lsundials_cvode -lsundials_sunmatrixdense -lsundials_sunlinsoldense -lsundials_sunlinsolspgmr" */
 /* End: */
