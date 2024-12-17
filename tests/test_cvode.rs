@@ -10,7 +10,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(u[0], 1.);
 
     let ctx = ode.into_context();
-    let mut ode = CVode::adams(0., &vec![0.],
+    let u0 = vec![0.];
+    let mut ode = CVode::adams(0., &u0,
         |_t, _u, du| du[0] = 1.)
         .build(ctx)?;
     let mut u = vec![f64::NAN];
