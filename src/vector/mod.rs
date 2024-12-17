@@ -634,7 +634,7 @@ impl<T: NVectorOps> Ops for T {
 unsafe fn new_nvector<T: NVectorOps + Ops>(ctx: SUNContext) -> N_Vector {
     let nv = N_VNewEmpty(ctx);
     if nv.is_null() {
-        panic!("sundials::vector::custom::Shared::new: \
+        panic!("sundials::vector::new_nvector: \
                 Could not allocate new N_Vector.");
     }
     (*nv).ops = Box::into_raw(Box::new(T::OPS));

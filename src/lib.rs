@@ -249,7 +249,7 @@ impl __BoxedContext {
     }
 
     unsafe fn with_communicator(
-        comm: *mut std::os::raw::c_void
+        comm: SUNComm
     ) -> Result<Self, Error> {
         let mut ctx: SUNContext = ptr::null_mut();
         if unsafe { SUNContext_Create(comm, &mut ctx as *mut _) } < 0 {
@@ -265,7 +265,7 @@ impl __BoxedContext {
     /// Returns a new `SUNContext` wrapped so that it will be freed
     /// when dropped.
     pub unsafe fn new() -> Result<Self, Error> {
-        unsafe { Self::with_communicator(ptr::null_mut()) }
+        unsafe { Self::with_communicator(sundials_sys::comm_no_mpi()) }
     }
 
     #[cfg(feature = "mpi")]
