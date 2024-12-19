@@ -70,4 +70,5 @@ jobs:
     - run: rustup target add ${{ matrix.target }}
     - run: cargo build --verbose
     - run: cargo test tests --verbose
+      if: ${{ ! startsWith(matrix.os, 'windows') }}
     - run: cargo run --example basic

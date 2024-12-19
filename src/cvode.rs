@@ -322,7 +322,13 @@ where
 struct CVodeMem(*mut c_void);
 
 impl Drop for CVodeMem {
-    fn drop(&mut self) { unsafe { CVodeFree(&mut self.0) } }
+    fn drop(&mut self) {
+        println!("drop(CVodeMem) {:?}", self.0);
+        // unsafe { CVodeFree(&mut self.0) }
+        println!("drop(CVodeMem) done");
+    }
+}
+
 impl CVodeMem {
     /// Return a new [`CVodeMem`] structure.
     fn new(

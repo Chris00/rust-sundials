@@ -237,7 +237,11 @@ impl Drop for __BoxedContext {
         // FIXME: Make sure the remark about MPI is followed (when
         // this library allows MPI)
         // https://sundials.readthedocs.io/en/latest/sundials/SUNContext_link.html#c.SUNContext_Free
-        unsafe { SUNContext_Free(self.0 as *mut _); }
+        unsafe {
+            println!("drop(__BoxedContext) {:?}", self.0);
+            // SUNContext_Free(self.0 as *mut _);
+            println!("drop(__BoxedContext)");
+        }
     }
 }
 
