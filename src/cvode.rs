@@ -180,13 +180,7 @@ where
     where G: FnMut(f64, &V, &mut [f64; M]) {
         // All configuration errors are reported by this function,
         // which is easier for the user.
-        let cvode_mem = unsafe {
-            CVodeMem(CVodeCreate(self.lmm, ctx.as_ptr())) };
-        if cvode_mem.0.is_null() {
-            return Err(Error::Failure{
-                name: self.name,
-                msg: "Allocation of the ODE structure failed." })
-        }
+        let cvode_mem = CVodeMem::new(self.name, &ctx, self.lmm)?;
         // let n = V::len(y0);
         // SAFETY: Once `y0` has been passed to `CVodeInit`, it is
         // copied to internal structures and thus the original `y0` can move.
@@ -329,6 +323,21 @@ struct CVodeMem(*mut c_void);
 
 impl Drop for CVodeMem {
     fn drop(&mut self) { unsafe { CVodeFree(&mut self.0) } }
+impl CVodeMem {
+    /// Return a new [`CVodeMem`] structure.
+    fn new(
+        name: &'static str, ctx: &impl Context, lmm: c_int
+    ) -> Result<Self, Error> {
+        let cvode_mem = unsafe {
+            CVodeCreate(lmm, ctx.as_ptr())
+        };
+        if cvode_mem.is_null() {
+            return Err(Error::Failure {
+                name,
+                msg: "Allocation of the ODE structure failed." })
+        }
+        Ok(CVodeMem(cvode_mem))
+    }
 }
 
 /// Return value of [`CVode::solve`] and [`CVode::step`].
