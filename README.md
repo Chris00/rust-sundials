@@ -11,7 +11,7 @@ The following code solves the equation ∂ₜu = f(t,u) where f is the
 function (t,u) ↦ 1 using Adams' method.
 
 ```rust
-use sundials::{context, cvode::CVode};
+use sundials::{context, cvode::{CVode, Solver}};
 fn main() -> Result<(), Box<sundials::Error>> {
     let mut ode = CVode::adams(0., &[0.], |t, u, du| *du = [1.])
 	    .build(context!()?)?;

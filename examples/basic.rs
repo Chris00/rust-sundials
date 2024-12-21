@@ -1,4 +1,4 @@
-use sundials::{context, cvode::CVode};
+use sundials::{context, cvode::{CVode, Solver}};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut ode = CVode::adams(0., &[0.],

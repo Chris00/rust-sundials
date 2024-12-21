@@ -10,7 +10,7 @@
 //! function (t,u) ↦ 1 using Adams' method.
 //!
 //! ```
-//! use sundials::{context, cvode::CVode};
+//! use sundials::{context, cvode::{CVode, Solver}};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let mut ode = CVode::adams(0., &0., |t, u, du| *du = 1.)
 //!     .build(context!()?)?;
@@ -24,7 +24,7 @@
 //!
 //! ```
 //! use std::f64::consts::PI;
-//! use sundials::{context, cvode::CVode};
+//! use sundials::{context, cvode::{CVode, Solver}};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let mut ode = CVode::adams(0., &[1., 0.], |t, &[u0, u1], du| {
 //!         *du = [-u1, u0]

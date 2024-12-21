@@ -1,5 +1,5 @@
 use std::time::Instant;
-use sundials::{context, cvode::CVode};
+use sundials::{context, cvode::{CVode, Solver}};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let now = Instant::now();
