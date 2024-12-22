@@ -8,7 +8,9 @@ pub struct LinSolver(SUNLinearSolver);
 impl Drop for LinSolver {
     // FIXME: handle possible returned error?
     // https://sundials.readthedocs.io/en/latest/sunlinsol/SUNLinSol_API_link.html?highlight=SUNLinSolFree#c.SUNLinSolFree
-    fn drop(&mut self) { unsafe { SUNLinSolFree(self.0); } }
+    fn drop(&mut self) {
+        unsafe { SUNLinSolFree(self.0); }
+    }
 }
 
 impl LinSolver {

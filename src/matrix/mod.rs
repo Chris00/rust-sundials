@@ -6,7 +6,9 @@ use super::{Context, Error};
 pub struct Matrix(SUNMatrix);
 
 impl Drop for Matrix {
-    fn drop(&mut self) { unsafe { SUNMatDestroy(self.0) } }
+    fn drop(&mut self) {
+        unsafe { SUNMatDestroy(self.0) }
+    }
 }
 
 impl Matrix {

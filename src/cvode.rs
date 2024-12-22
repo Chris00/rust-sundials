@@ -352,13 +352,15 @@ where
     }
 }
 
-// Implement the Drop trait only on the pointer to be able to move
-// values out of the structure `CVode`.
 #[derive(Debug)]
 struct CVodeMem(*mut c_void);
 
+// Implement the Drop trait only on the pointer to be able to move
+// values out of the structure `CVode`.
 impl Drop for CVodeMem {
-    fn drop(&mut self) { unsafe { CVodeFree(&mut self.0) } }
+    fn drop(&mut self) {
+        unsafe { CVodeFree(&mut self.0) }
+    }
 }
 
 impl CVodeMem {
@@ -417,7 +419,7 @@ where V: Vector,
     // We hold `Matrix` and `LinSolver` so they are freed when `CVode`
     // is dropped.
     _matrix: Option<Matrix>,
-    _linsolver: Option<LinSolver>,
+    _linsolver: Option<LinSolver>, // depends on `ctx`
     rootsfound: Vec<c_int>, // cache, with len() == number of eq
     cb: CB,
     cvode_mem: CVodeMem, // depends on `ctx`.
