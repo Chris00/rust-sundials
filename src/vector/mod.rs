@@ -229,7 +229,7 @@ impl<T: NVectorOps> Ops for T {
         /// Creates a new N_Vector of the same type as an existing vector
         /// `nv` and sets the ops field.  It does not copy the vector, but
         /// rather allocates storage for the new vector.
-        #[cfg(feature = "nightly")]
+        #[cfg(all(feature = "nightly", not(windows)))]
         unsafe extern "C" fn nvclone_rust<T: NVectorOps>(
             nw: N_Vector
         ) -> N_Vector {
@@ -249,7 +249,7 @@ impl<T: NVectorOps> Ops for T {
             Box::into_raw(Box::new_in(v, std::alloc::System))
         }
 
-        #[cfg(not(feature = "nightly"))]
+        #[cfg(any(not(feature = "nightly"), windows))]
         unsafe extern "C" fn nvclone_rust<T: NVectorOps>(
             nw: N_Vector
         ) -> N_Vector {
