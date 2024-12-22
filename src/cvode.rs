@@ -16,7 +16,8 @@
 use std::{
     borrow::Borrow,
     ffi::{c_int, c_void, c_long},
-    marker::PhantomData, ptr,
+    marker::PhantomData,
+    ptr,
 };
 use sundials_sys::*;
 use super::{
@@ -231,7 +232,8 @@ where
             cvode_mem.0,
             Some(Self::cvrhs),
             self.t0,
-            y0 as *mut _) };
+            V::as_ptr(&y0)) // `CVodeInit` does not modify `y0`.
+        };
         if r == CV_MEM_FAIL {
             let msg = "a memory allocation request has failed";
             return Err(Error::Failure{name: self.name, msg})
@@ -248,7 +250,7 @@ where
         let linsolver = unsafe { LinSolver::spgmr(
             self.name,
             ctx.as_ptr(),
-            y0 as *mut _)? };
+            V::as_ptr(&y0))? };
         let r = unsafe { CVodeSetLinearSolver(
             cvode_mem.0, linsolver.as_ptr(), ptr::null_mut()) };
         if r != CVLS_SUCCESS as i32 {
@@ -548,7 +550,7 @@ where
         // Reinitialize to allow any time `t`, even if not monotonic
         // w.r.t. previous calls.
         let ret = unsafe {
-            CVodeReInit(self.cvode_mem.0, t0, y0 as *mut _)
+            CVodeReInit(self.cvode_mem.0, t0, V::as_ptr(&y0))
         };
         if ret != CV_SUCCESS {
             panic!("CVodeReInit returned code {ret}.  Please report.");
@@ -586,7 +588,7 @@ where Ctx: Context,
         // Safety: `yout` does not escape this function and so will
         // not outlive `self.ctx` and `y` will not move while `yout`
         // is in use.
-        let yout =
+        let mut yout =
             match unsafe { V::as_mut_nvector(y, self.ctx.as_ptr()) }{
                 Some(yout) => yout,
                 None => panic!("The context of the output vector y is not \
@@ -596,7 +598,7 @@ where Ctx: Context,
         let r = unsafe { CVode(
             self.cvode_mem.0,
             t,
-            yout,
+            V::as_mut_ptr(&mut yout),
             &mut tret, itask) };
         let status = match r {
             CV_SUCCESS => CVStatus::Ok,

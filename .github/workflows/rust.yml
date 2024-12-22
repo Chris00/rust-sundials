@@ -8,7 +8,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        build: [stable, beta, nightly, linux32, macos, aarch64-ios, win64, windows-latest]
+        build: [stable, beta, nightly, linux32, macos, aarch64-ios, win64, win64-nightly]
         include:
           - build: stable
             os: ubuntu-latest
@@ -42,9 +42,9 @@ jobs:
             os: windows-latest
             rust: stable
             target: x86_64-pc-windows-msvc
-          - build: windows-latest
+          - build: win64-nightly
             os: windows-latest
-            rust: stable-x86_64
+            rust: nightly
             target: x86_64-pc-windows-msvc
     steps:
     - uses: actions/checkout@master
@@ -71,3 +71,6 @@ jobs:
     - run: cargo build --verbose
     - run: cargo test tests --verbose
     - run: cargo run --example basic
+    - run: cargo run --example speed --release
+    - run: cargo run --example speed --release --features nightly
+      if: startsWith(matrix.rust, 'nightly')

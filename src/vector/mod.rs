@@ -42,10 +42,17 @@ pub unsafe trait Vector: Clone {
     /// otherwise.
     ///
     /// # Safety
-    /// The return value must not outlive `v` and `ctx`.  Moreover `v`
+    /// The return value must not outlive `v` and `ctx`.  The C code
+    /// should *not* modify the returned N_Vector.  Moreover `v`
     /// should not move while the return value is in use.
-    unsafe fn as_nvector(
-        v: &Self, ctx: SUNContext) -> Option<*const _generic_N_Vector>;
+    unsafe fn as_nvector(v: &Self, ctx: SUNContext) -> Option<Self::NVec>;
+
+    /// Alias of read only `N_Vector`, or wrapper around `N_Vector` if,
+    /// for example, allocation (and a custom [`Drop`]) is needed.
+    type NVec;
+
+    /// Return a raw pointer [`N_Vector`] which must *not* be modified.
+    fn as_ptr(nv: &Self::NVec) -> N_Vector;
 
     /// Return a wrapper of a `N_Vector` that can mutate `self`.  If
     /// `self` already possesses a [`Context`][crate::Context], this
@@ -56,7 +63,14 @@ pub unsafe trait Vector: Clone {
     /// The return value must not outlive `v` and `ctx`.  Moreover `v`
     /// should not move while the return value is in use.
     unsafe fn as_mut_nvector(
-        v: &mut Self, ctx: SUNContext) -> Option<N_Vector>;
+        v: &mut Self, ctx: SUNContext) -> Option<Self::NVecMut>;
+
+    /// Alias of `N_Vector`, or wrapper around `N_Vector` if
+    /// allocation (and a custom [`Drop`]) is needed.
+    type NVecMut;
+
+    /// Return a raw pointer [`N_Vector`].
+    fn as_mut_ptr(nv: &mut Self::NVecMut) -> N_Vector;
 }
 
 
@@ -242,23 +256,15 @@ impl<T: NVectorOps> Ops for T {
             let w = ref_of_nvector::<T>(nw);
             // Rust memory cannot be uninitialized, thus clone.
             let v = w.clone();
-            //// Sundials functions — slow.
-            // let nv = N_VNewEmpty((*nw).sunctx);
+            let nv = N_VNewEmpty((*nw).sunctx);
+            //// Sundials function — slow.
             // if N_VCopyOps(nw, nv) != 0 {
             //     return std::ptr::null_mut()
             // }
-            // (*nv).content = Box::into_raw(Box::new(v)) as *mut c_void;
-            // nv
-
-            //// libc version — safe as Sundials uses malloc.
-            let sunctx = (*nw).sunctx;
-            let nv = libc::malloc(
-                std::mem::size_of::<_generic_N_Vector>()) as N_Vector;
-            (*nv).sunctx = sunctx;
-            let n = std::mem::size_of::<_generic_N_Vector_Ops>();
-            let ops = libc::malloc(n);
-            libc::memcpy(ops, (*nw).ops as *mut c_void, n);
-            (*nv).ops = ops as N_Vector_Ops;
+            libc::memcpy(
+                (*nv).ops as *mut c_void,
+                (*nw).ops as *mut c_void,
+                std::mem::size_of::<_generic_N_Vector_Ops>());
             (*nv).content = Box::into_raw(Box::new(v)) as *mut c_void;
             nv
         }
@@ -630,15 +636,14 @@ impl<T: NVectorOps> Ops for T {
     };
 }
 
-#[inline]
-unsafe fn new_nvector<T: NVectorOps + Ops>(ctx: SUNContext) -> N_Vector {
-    let nv = N_VNewEmpty(ctx);
-    if nv.is_null() {
-        panic!("sundials::vector::new_nvector: \
-                Could not allocate new N_Vector.");
-    }
-    (*nv).ops = Box::into_raw(Box::new(T::OPS));
-    nv
+/// Wrapper around a read-only `N_Vector`.
+pub struct SharedVec {
+    nvector: _generic_N_Vector, // This is allocated and freed by Rust.
+}
+
+/// Wrapper around a `N_Vector` to de-allocate the structure when dropped.
+pub struct SharedVecMut {
+    nvector: _generic_N_Vector,
 }
 
 unsafe impl<T: NVectorOps> Vector for T {
@@ -656,23 +661,39 @@ unsafe impl<T: NVectorOps> Vector for T {
         }
     }
 
+    type NVec = SharedVec;
+
+    fn as_ptr(nv: &Self::NVec) -> N_Vector {
+        &nv.nvector as *const _ as *mut _
+    }
+
+    type NVecMut = SharedVecMut;
+
+    fn as_mut_ptr(nv: &mut Self::NVecMut) -> N_Vector {
+         &mut nv.nvector
+    }
+
     #[inline]
-    unsafe fn as_nvector(
-        v: &Self, ctx: SUNContext
-    ) -> Option<*const _generic_N_Vector> {
+    unsafe fn as_nvector(v: &Self, ctx: SUNContext) -> Option<Self::NVec> {
         // See https://sundials.readthedocs.io/en/latest/nvectors/NVector_API_link.html#implementing-a-custom-nvector
-        let nv = new_nvector::<T>(ctx);
-        (*nv).content = v as *const T as *mut c_void;
-        Some(nv)
+        let nvector = _generic_N_Vector {
+            content: v as *const T as *mut c_void,
+            ops: Box::into_raw(Box::new(T::OPS)),
+            sunctx: ctx,
+        };
+        Some(SharedVec { nvector })
     }
 
     #[inline]
     unsafe fn as_mut_nvector(
         v: &mut Self, ctx: SUNContext
-    ) -> Option<N_Vector> {
-        let nv = new_nvector::<T>(ctx);
-        (*nv).content = v as *mut T as *mut c_void;
-        Some(nv)
+    ) -> Option<Self::NVecMut> {
+        let nvector = _generic_N_Vector {
+            content: v as *const T as *mut c_void,
+            ops: Box::into_raw(Box::new(T::OPS)),
+            sunctx: ctx,
+        };
+        Some(SharedVecMut { nvector })
     }
 }
 
