@@ -5,7 +5,7 @@
 //! # Example
 //!
 //! ```
-//! use sundials::{context, cvode::{CVode, Solver}};
+//! use sundials::{context, cvode::{CVode, Solver as _}};
 //! let mut ode = CVode::adams(0., &[0.], |t, u, du| *du = [1.])
 //!     .build(context!(P1)?)?;
 //! let (u1, _) = ode.cauchy(0., &[0.], 1.);
