@@ -1,7 +1,7 @@
 [package]
 name = "sundials"
-version = "0.0.2"
-edition = "2021"
+version = "0.0.3"
+edition = "2024"
 authors = ["Christophe Troestler <christophe.troestler@umons.ac.be>"]
 description = "Bindings to Sundials ordinary differential equations solvers"
 homepage = "https://github.com/Chris00/rust-sundials"
@@ -10,6 +10,7 @@ documentation = "https://docs.rs/sundials"
 license = "BSD-3-Clause"
 keywords = ["ODE", "math", "numerics", "simulation", "science"]
 categories = ["mathematics", "science"]
+rust-version = "1.85"
 
 [features]
 default = ["arkode", "cvode", "ida", "kinsol"]

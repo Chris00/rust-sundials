@@ -176,6 +176,7 @@ pub trait NVectorOps: Clone {
     /// - xᵢ ≥ 0 if cᵢ = 1,
     /// - xᵢ < 0 if cᵢ = -2,
     /// - xᵢ ≤ 0 if cᵢ = -1.
+    ///
     /// There is no constraint on xᵢ if cᵢ = 0.  This routine returns
     /// `false` if any element failed the constraint test and `true`
     /// if all passed.  It also sets a mask vector `m`, with elements
@@ -213,18 +214,18 @@ impl<T: NVectorOps> Ops for T {
         /// data belongs to `nv` if internal to Sundials or to another
         /// Rust value if it is shared.
         #[inline]
-        unsafe fn mut_of_nvector<'a, T>(nv: N_Vector) -> &'a mut T {
+        unsafe fn mut_of_nvector<'a, T>(nv: N_Vector) -> &'a mut T { unsafe {
             // FIXME: When `nv` content is shared with another Rust
             // value, there will be temporarily be two Rust values
             // pointing to the same data.  Make sure it is fine as
             // this one is very local.
             ((*nv).content as *mut T).as_mut().unwrap()
-        }
+        }}
 
         #[inline]
-        unsafe fn ref_of_nvector<'a, T>(nv: N_Vector) -> &'a T {
+        unsafe fn ref_of_nvector<'a, T>(nv: N_Vector) -> &'a T { unsafe {
             mut_of_nvector(nv)
-        }
+        }}
 
         /// Creates a new N_Vector of the same type as an existing vector
         /// `nv` and sets the ops field.  It does not copy the vector, but
@@ -252,7 +253,7 @@ impl<T: NVectorOps> Ops for T {
         #[cfg(any(not(feature = "nightly"), windows))]
         unsafe extern "C" fn nvclone_rust<T: NVectorOps>(
             nw: N_Vector
-        ) -> N_Vector {
+        ) -> N_Vector { unsafe {
             let w = ref_of_nvector::<T>(nw);
             // Rust memory cannot be uninitialized, thus clone.
             let v = w.clone();
@@ -267,45 +268,46 @@ impl<T: NVectorOps> Ops for T {
                 std::mem::size_of::<_generic_N_Vector_Ops>());
             (*nv).content = Box::into_raw(Box::new(v)) as *mut c_void;
             nv
-        }
+        }}
 
         /// Destroys the N_Vector `nv` and frees memory allocated for
         /// its internal data.
-        unsafe extern "C" fn nvdestroy_rust<T: NVectorOps>(nv: N_Vector) {
+        unsafe extern "C" fn nvdestroy_rust<T: NVectorOps>(nv: N_Vector) { unsafe {
             // This is for N_Vectors managed by Sundials.  Rust `Shared`
             // values will not call N_Vector operations.
             let v = Box::from_raw((*nv).content as *mut T);
             drop(v);
             N_VFreeEmpty(nv);
-        }
+        }}
 
         /// Returns storage requirements for the N_Vector `nv`:
         /// - `lrw` contains the number of realtype words;
         /// - `liw` contains the number of integer words.
+        ///
         /// This function is advisory only.
         unsafe extern "C" fn nvspace_rust<T: NVectorOps>(
             nv: N_Vector, lrw: *mut sunindextype, liw: *mut sunindextype
-        ) {
+        ) { unsafe {
             let v = ref_of_nvector::<T>(nv);
             let n = T::len(v);
             *lrw = n as sunindextype;
             *liw = 1;
-        }
+        }}
 
         /// Returns the global length (number of “active” entries) in the
         /// N_Vector `nv`.
         unsafe extern "C" fn nvgetlength_rust<T: NVectorOps>(
             nv: N_Vector
-        ) -> sunindextype {
+        ) -> sunindextype { unsafe {
             let v = ref_of_nvector::<T>(nv);
             let n = T::len(v);
             n as sunindextype
-        }
+        }}
 
         /// Performs the operation `z = ax + by`.
         unsafe extern "C" fn nvlinearsum_rust<T: NVectorOps>(
             a: realtype, nx: N_Vector, b: realtype, ny: N_Vector, nz: N_Vector
-        ) {
+        ) { unsafe {
             let z = mut_of_nvector(nz);
             if nz == nx && nz == ny { // z = (a + b) z
                 T::scale(z, a+b);
@@ -324,28 +326,28 @@ impl<T: NVectorOps> Ops for T {
             let x = ref_of_nvector(nx);
             let y = ref_of_nvector(ny);
             T::linear_sum_assign(z, a, x, b, y);
-        }
+        }}
 
         /// Sets all components of `nz` to realtype `c`.
         unsafe extern "C" fn nvconst_rust<T: NVectorOps>(
             c: realtype, nz: N_Vector
-        ) {
+        ) { unsafe {
             let z = mut_of_nvector::<T>(nz);
             T::const_assign(z, c);
-        }
+        }}
 
         /// Sets `nz` to be the component-wise product of the inputs `nx`
         /// and `ny`: ∀i, zᵢ = xᵢ yᵢ.
         unsafe extern "C" fn nvprod_rust<T: NVectorOps>(
             nx: N_Vector, ny: N_Vector, nz: N_Vector
-        ) {
+        ) { unsafe {
             assert_ne!(nz, nx);
             assert_ne!(nz, ny);
             let x = ref_of_nvector(nx);
             let y = ref_of_nvector(ny);
             let z = mut_of_nvector(nz);
             T::mul_assign(z, x, y);
-        }
+        }}
 
         /// Sets the `nz` to be the component-wise ratio of the inputs
         /// `nx` and `ny`: ∀i, zᵢ = xᵢ/yᵢ.  The yᵢ may not be tested
@@ -353,7 +355,7 @@ impl<T: NVectorOps> Ops for T {
         /// y that is guaranteed to have all nonzero components.
         unsafe extern "C" fn nvdiv_rust<T: NVectorOps>(
             nx: N_Vector, ny: N_Vector, nz: N_Vector
-        ) {
+        ) { unsafe {
             let z = mut_of_nvector(nz);
             if nz == nx {
                 if nz == ny {
@@ -373,13 +375,13 @@ impl<T: NVectorOps> Ops for T {
             let x = ref_of_nvector(nx);
             let y = ref_of_nvector(ny);
             T::div_assign(z, x, y);
-        }
+        }}
 
         /// Scales the `nx` by the scalar `c` and returns the result
         /// in `z`: ∀i, zᵢ = cxᵢ.
         unsafe extern "C" fn nvscale_rust<T: NVectorOps>(
             c: f64, nx: N_Vector, nz: N_Vector
-        ) {
+        ) { unsafe {
             let z = mut_of_nvector(nz);
             if nz == nx {
                 T::scale(z, c);
@@ -387,24 +389,24 @@ impl<T: NVectorOps> Ops for T {
                 let x = ref_of_nvector(nx);
                 T::scale_assign(z, c, x);
             }
-        }
+        }}
 
         /// Sets the components of the `nz` to be the absolute values
         /// of the components of the `nx`: ∀i, zᵢ = |xᵢ|.
         unsafe extern "C" fn nvabs_rust<T: NVectorOps>(
             nx: N_Vector, nz: N_Vector
-        ) {
+        ) { unsafe {
             assert_ne!(nz, nx);
             let x = ref_of_nvector(nx);
             let z = mut_of_nvector(nz);
             T::abs_assign(z, x);
-        }
+        }}
 
         /// Sets the components of the `nz` to be the inverses of the
         /// components of `nx`: ∀i, zᵢ = 1/xᵢ.
         unsafe extern "C" fn nvinv_rust<T: NVectorOps>(
             nx: N_Vector, nz: N_Vector
-        ) {
+        ) { unsafe {
             let z = mut_of_nvector(nz);
             if nz == nx {
                 T::inv(z);
@@ -412,13 +414,13 @@ impl<T: NVectorOps> Ops for T {
                 let x = ref_of_nvector(nx);
                 T::inv_assign(z, x);
             }
-        }
+        }}
 
         /// Adds the scalar `b` to all components of `nx` and returns
         /// the result in `nz`: ∀i, zᵢ = xᵢ + b.
         unsafe extern "C" fn nvaddconst_rust<T: NVectorOps>(
             nx: N_Vector, b: f64, nz: N_Vector
-        ) {
+        ) { unsafe {
             let z = mut_of_nvector(nz);
             if nz == nx {
                 T::add_const(z, b);
@@ -426,34 +428,34 @@ impl<T: NVectorOps> Ops for T {
                 let x = ref_of_nvector(nx);
                 T::add_const_assign(z, x, b);
             }
-        }
+        }}
 
         /// Returns the value of the dot-product of `nx` and `ny`: ∑ xᵢ yᵢ.
         unsafe extern "C" fn nvdotprod_rust<T: NVectorOps>(
             nx: N_Vector, ny: N_Vector
-        ) -> realtype {
+        ) -> realtype { unsafe {
             let x = ref_of_nvector(nx);
             let y = ref_of_nvector(ny);
-            T::dot(&x, &y)
-        }
+            T::dot(x, y)
+        }}
 
         /// Returns the value of the ℓ^∞ norm of `nx`: maxᵢ |xᵢ|.
         unsafe extern "C" fn nvmaxnorm_rust<T: NVectorOps>(
             nx: N_Vector
-        ) -> realtype {
+        ) -> realtype { unsafe {
             let x = ref_of_nvector(nx);
             T::max_norm(x)
-        }
+        }}
 
         /// Returns the weighted root-mean-square norm of `nx` with
         /// (positive) realtype weight vector `nw`: √(∑ (xᵢ wᵢ)² / n).
         unsafe extern "C" fn nvwrmsnorm_rust<T: NVectorOps>(
             nx: N_Vector, nw: N_Vector
-        ) -> realtype {
+        ) -> realtype { unsafe {
             let x = ref_of_nvector(nx);
             let w = ref_of_nvector(nw);
-            T::wrms_norm(&x, &w)
-        }
+            T::wrms_norm(x, w)
+        }}
 
         /// Returns the weighted root mean square norm of `nx` with
         /// weight vector `nw` built using only the elements of `nx`
@@ -462,50 +464,50 @@ impl<T: NVectorOps> Ops for T {
         /// H(α) = 0 if α ≤ 0.
         unsafe extern "C" fn nvwrmsnormmask_rust<T: NVectorOps>(
             nx: N_Vector, nw: N_Vector, nid: N_Vector
-        ) -> realtype {
+        ) -> realtype { unsafe {
             let x = ref_of_nvector(nx);
             let w = ref_of_nvector(nw);
             let id = ref_of_nvector(nid);
             T::wrms_norm_mask(x, w, id)
-        }
+        }}
 
         /// Returns the smallest element of the `nx`: minᵢ xᵢ.
         unsafe extern "C" fn nvmin_rust<T: NVectorOps>(
             nx: N_Vector
-        ) -> realtype {
+        ) -> realtype { unsafe {
             let x = ref_of_nvector(nx);
             T::min(x)
-        }
+        }}
 
         /// Returns the weighted Euclidean norm of `nx` with realtype
         /// weight vector `nw`: √(∑ (xᵢ wᵢ)²).
         unsafe extern "C" fn nvwl2norm_rust<T: NVectorOps>(
             nx: N_Vector, nw: N_Vector
-        ) -> realtype {
+        ) -> realtype { unsafe {
             let x = ref_of_nvector(nx);
             let w = ref_of_nvector(nw);
             T::wl2_norm(x, w)
-        }
+        }}
 
         /// Returns the ℓ¹ norm of `nx`: ∑ |xᵢ|.
         unsafe extern "C" fn nvl1norm_rust<T: NVectorOps>(
             nx: N_Vector
-        ) -> realtype {
+        ) -> realtype { unsafe {
             let x = ref_of_nvector(nx);
             T::l1_norm(x)
-        }
+        }}
 
         /// Compares the components of `nx` to the realtype scalar `c`
         /// and returns a `nz` such that ∀i, zᵢ = 1.0 if |xᵢ| ≥ `c`
         /// and zᵢ = 0.0 otherwise.
         unsafe extern "C" fn nvcompare_rust<T: NVectorOps>(
             c: f64, nx: N_Vector, nz: N_Vector
-        ) {
+        ) { unsafe {
             assert_ne!(nz, nx);
             let x = ref_of_nvector(nx);
             let z = mut_of_nvector(nz);
             T::compare_assign(z, c, x)
-        }
+        }}
 
         /// Sets the components of `nz` to be the inverses of the
         /// components of `nx`, with prior testing for zero values:
@@ -514,19 +516,20 @@ impl<T: NVectorOps> Ops for T {
         /// inversion) and returns `SUNFALSE` otherwise.
         unsafe extern "C" fn nvinvtest_rust<T: NVectorOps>(
             nx: N_Vector, nz: N_Vector
-        ) -> i32 {
+        ) -> i32 { unsafe {
             assert_ne!(nz, nx);
             let x = ref_of_nvector(nx);
             let z = mut_of_nvector(nz);
             let b = T::inv_test_assign(z, x);
             (if b { SUNTRUE } else { SUNFALSE }) as _
-        }
+        }}
 
         /// Performs the following constraint tests based on the values in cᵢ:
         /// - xᵢ > 0 if cᵢ = 2,
         /// - xᵢ ≥ 0 if cᵢ = 1,
         /// - xᵢ < 0 if cᵢ = -2,
         /// - xᵢ ≤ 0 if cᵢ = -1.
+        ///
         /// There is no constraint on xᵢ if cᵢ = 0.  This routine
         /// returns a boolean assigned to `SUNFALSE` if any element
         /// failed the constraint test and assigned to `SUNTRUE` if
@@ -536,7 +539,7 @@ impl<T: NVectorOps> Ops for T {
         /// for constraint checking.
         unsafe extern "C" fn nvconstrmask_rust<T: NVectorOps>(
             nc: N_Vector, nx: N_Vector, nm: N_Vector
-        ) -> i32 {
+        ) -> i32 { unsafe {
             assert_ne!(nm, nc);
             assert_ne!(nm, nx);
             let c = ref_of_nvector(nc);
@@ -544,18 +547,18 @@ impl<T: NVectorOps> Ops for T {
             let m = mut_of_nvector(nm);
             let b = T::constr_mask_assign(m, c, x);
             (if b { SUNTRUE } else { SUNFALSE }) as _
-        }
+        }}
 
         /// This routine returns the minimum of the quotients obtained
         /// by termwise dividing the elements of n = `nnum` by the
         /// elements in d = `ndenom`: minᵢ nᵢ/dᵢ.
         unsafe extern "C" fn nvminquotient_rust<T: NVectorOps>(
             nnum: N_Vector, ndenom: N_Vector
-        ) -> f64 {
+        ) -> f64 { unsafe {
             let num = ref_of_nvector(nnum);
             let denom = ref_of_nvector(ndenom);
             T::min_quotient(num, denom)
-        }
+        }}
 
         _generic_N_Vector_Ops {
             nvgetvectorid: Some(nvgetvectorid_rust),
@@ -1027,7 +1030,7 @@ impl NVectorOps for f64 {
     fn div_assign(z: &mut Self, x: &Self, y: &Self) { *z = x / y }
 
     #[inline]
-    fn div(z: &mut Self, y: &Self) { *z = *z / y }
+    fn div(z: &mut Self, y: &Self) { *z /= y }
 
     #[inline]
     fn inv_mul(z: &mut Self, x: &Self) { *z = x / *z }
@@ -1036,13 +1039,13 @@ impl NVectorOps for f64 {
     fn scale_assign(z: &mut Self, c: f64, x: &Self) { *z = c * x }
 
     #[inline]
-    fn scale(z: &mut Self, c: f64) { *z = c * *z }
+    fn scale(z: &mut Self, c: f64) { *z *= c }
 
     #[inline]
     fn add_const_assign(z: &mut Self, x: &Self, b: f64) { *z = x + b }
 
     #[inline]
-    fn add_const(z: &mut Self, b: f64) { *z = *z + b }
+    fn add_const(z: &mut Self, b: f64) { *z += b }
 
     #[inline]
     fn linear_sum_assign(z: &mut Self, a: f64, x: &Self, b: f64, y: &Self) {

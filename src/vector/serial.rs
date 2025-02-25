@@ -23,4 +23,8 @@ impl<Ctx: Context> Vector<Ctx> {
     pub fn len(&self) -> usize {
         unsafe { N_VGetLength_Serial(self.nv) as _ }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }

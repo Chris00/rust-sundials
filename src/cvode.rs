@@ -28,6 +28,17 @@ use super::{
     linear_solver::LinSolver,
 };
 
+/// Return value of [`CVode::solve`] and [`CVode::step`].
+#[derive(Debug, PartialEq)]
+pub enum CVStatus {
+    Ok,
+    /// Succeeded by reaching the stopping point specified through
+    /// [`CVodeConf::set_tstop`].
+    Tstop(f64),
+    Root(f64, Vec<bool>),
+    Error(Error),
+}
+
 #[derive(Clone)]
 #[repr(C)]
 /// Holds the function closures to construct a [`CVode`] solver.
@@ -39,6 +50,9 @@ pub struct CB<V, F, G, Roots>
     _roots: PhantomData<Roots>,
     n_roots: usize,
 }
+
+/// Callbacks for [`CVode`] where no root searching capability has been set.
+type CBNoRoots<V, F> = CB<V, F, fn(f64, &V, &mut [f64; 0]), [f64; 0]>;
 
 impl<V, F0, G0, Roots> CB<V, F0, G0, Roots> {
     fn update_g<G, R>(self, g: G, n_roots: usize) -> CB<V, F0, G, R>
@@ -62,7 +76,6 @@ impl<V, F0, G0, Roots> CB<V, F0, G0, Roots> {
 #[derive(Clone)]
 pub struct CVodeConf<'a, V, CB>
 where V: Vector {
-    name: &'static str,
     lmm: c_int,
     t0: f64,
     y0: &'a V,
@@ -79,17 +92,18 @@ impl<'a, V> CVodeConf<'a, V, ()>
 where
     V: Vector
 {
+    /// Function to use when no root searching capability is set.
     fn dummy_g(_: f64, _: &V, _: &mut [f64; 0]) {
         unreachable!()
     }
 
     fn new<F>(
-        name: &'static str, lmm: c_int,
+        lmm: c_int,
         t0: f64, y0: &'a V, f: F,
-    ) -> CVodeConf<'a, V, CB<V, F, fn(f64, &V, &mut [f64; 0]), [f64; 0]>>
+    ) -> CVodeConf<'a, V, CBNoRoots<V, F>>
     where F: FnMut(f64, &V, &mut V) + 'a {
         CVodeConf {
-            name, lmm,
+            lmm,
             t0, y0,
             cb: CB {
                 vec: PhantomData,
@@ -108,9 +122,7 @@ where
     }
 }
 
-impl<'a, V, F0, G0, Roots> CVodeConf<'a, V, CB<V, F0, G0, Roots>>
-where
-    V: Vector,
+impl<V: Vector, F0, G0, Roots> CVodeConf<'_, V, CB<V, F0, G0, Roots>>
 {
     /// Set the relative tolerance.
     pub fn rtol(mut self, rtol: f64) -> Self {
@@ -198,7 +210,7 @@ where
         // Since we do not know how this was allocated (it is not an
         // N_Vector), no other interface can be provided.
         CVodeConf {
-            name: self.name,  lmm: self.lmm,
+            lmm: self.lmm,
             t0: self.t0,  y0: self.y0,
             cb: self.cb.update_g(g, M),
             rtol: self.rtol,
@@ -213,10 +225,10 @@ where
     /// Build the ODE solver with the [`Context`] `ctx`.
     pub fn build<Ctx: Context>(
         self, ctx: Ctx,
-    ) -> Result<CVode<Ctx, V, CB<V, F0, G0, Roots>>, super::Error> {
+    ) -> Result<CVode<Ctx, V, CB<V, F0, G0, Roots>>, Error> {
         // All configuration errors are reported by this function,
         // which is easier for the user.
-        let cvode_mem = CVodeMem::new(self.name, &ctx, self.lmm)?;
+        let cvode_mem = CVodeMem::new(&ctx, self.lmm)?;
         // let n = V::len(y0);
         // SAFETY: Once `y0` has been passed to `CVodeInit`, it is
         // copied to internal structures and thus the original `y0` can move.
@@ -235,12 +247,10 @@ where
             V::as_ptr(&y0)) // `CVodeInit` does not modify `y0`.
         };
         if r == CV_MEM_FAIL {
-            let msg = "a memory allocation request has failed";
-            return Err(Error::Failure{name: self.name, msg})
+            return Err(Error::AllocFailure)
         }
         if r == CV_ILL_INPUT {
-            let msg = "An input argument has an illegal value";
-            return Err(Error::Failure{name: self.name, msg})
+            return Err(Error::IllInput)
         }
         // Set default tolerances (otherwise the solver will complain).
         unsafe { CVodeSStolerances(
@@ -248,16 +258,12 @@ where
         // Set the default linear solver to one that does not require
         // the `…nvgetarraypointer` on vectors (FIXME: configurable)
         let linsolver = unsafe { LinSolver::spgmr(
-            self.name,
             ctx.as_ptr(),
             V::as_ptr(&y0))? };
         let r = unsafe { CVodeSetLinearSolver(
             cvode_mem.0, linsolver.as_ptr(), ptr::null_mut()) };
         if r != CVLS_SUCCESS as i32 {
-            return Err(Error::Failure {
-                name: self.name,
-                msg: "could not attach linear solver"
-            })
+            panic!("CVode::build: Could not attach linear solver");
         }
         if let Some(maxord) = self.maxord {
             unsafe { CVodeSetMaxOrd(
@@ -273,24 +279,21 @@ where
         if let Some(tstop) = self.tstop {
             if tstop.is_nan() {
                 // unsafe { CVodeClearStopTime(cvode_mem.0); }
-                ()
             } else {
                 let ret = unsafe { CVodeSetStopTime(
                     cvode_mem.0,
                     tstop) };
                 if ret == CV_ILL_INPUT {
-                    // FIXME: should not happen in this configuration
+                    // Should not happen in this configuration
                     // as it is fixed ahead of execution.
-                    let msg = "The 'tstop' time is not is not beyond \
-                        the current time value.";
-                    return Err(Error::Failure { name: self.name, msg });
+                    panic!("The 'tstop' time is not is not beyond \
+                        the current time value.  Please report this bug.");
                 }
             }
         }
         unsafe { CVodeSetMaxHnilWarns(cvode_mem.0, self.max_hnil_warns) };
-        let mut rootsfound;
         let n_roots = self.cb.n_roots;
-        if n_roots > 0 {
+        let rootsfound = if n_roots > 0 {
             let r = unsafe  {
                 CVodeRootInit(cvode_mem.0, n_roots as _,
                     Some(Self::cvroot1)) };
@@ -298,11 +301,10 @@ where
                 panic!("Sundials::cvode::CVode::root: memory allocation \
                     failed.");
             }
-            rootsfound = Vec::with_capacity(n_roots);
-            rootsfound.resize(n_roots, 0);
+            vec![0; n_roots]
         } else {
-            rootsfound = vec![];
-        }
+            vec![]
+        };
         Ok(CVode {
             ctx,  cvode_mem,
             t0: self.t0,  len,  vec: PhantomData,
@@ -367,41 +369,15 @@ impl Drop for CVodeMem {
 
 impl CVodeMem {
     /// Return a new [`CVodeMem`] structure.
-    fn new(
-        name: &'static str, ctx: &impl Context, lmm: c_int
-    ) -> Result<Self, Error> {
+    fn new(ctx: &impl Context, lmm: c_int) -> Result<Self, Error> {
         let cvode_mem = unsafe {
             CVodeCreate(lmm, ctx.as_ptr())
         };
         if cvode_mem.is_null() {
-            return Err(Error::Failure {
-                name,
-                msg: "Allocation of the ODE structure failed." })
+            return Err(Error::AllocFailure)
         }
         Ok(CVodeMem(cvode_mem))
     }
-}
-
-/// Return value of [`CVode::solve`] and [`CVode::step`].
-#[derive(Debug, PartialEq)]
-pub enum CVStatus {
-    Ok,
-    /// Succeeded by reaching the stopping point specified through
-    /// [`CVodeConf::set_tstop`].
-    Tstop(f64),
-    Root(f64, Vec<bool>),
-    IllInput,
-    /// The initial time `t0` and the output time `t` are too close to
-    /// each other and the user did not specify an initial step size.
-    TooClose,
-    /// The solver took [`CVodeConf::mxsteps`] internal steps but could
-    /// not reach the final time.
-    TooMuchWork,
-    /// The solver could not satisfy the accuracy demanded by the user
-    /// for some internal step.
-    TooMuchAcc,
-    ErrFailure,
-    ConvFailure,
 }
 
 /// Solver for stiff and nonstiff initial value problems for ODE systems.
@@ -437,9 +413,9 @@ impl<V: Vector> CVode<(), V, ()>
     // The fixed-point solver is recommended for nonstiff problems.
     pub fn adams<'a, F>(
         t0: f64, y0: &'a V, f: F
-    ) -> CVodeConf<'a, V, CB<V, F, fn(f64, &V, &mut [f64; 0]), [f64; 0]>>
+    ) -> CVodeConf<'a, V, CBNoRoots<V, F>>
     where F: FnMut(f64, &V, &mut V) + 'a {
-        CVodeConf::new("CVode::adams", CV_ADAMS, t0, y0, f)
+        CVodeConf::new(CV_ADAMS, t0, y0, f)
     }
 
     /// Solver using the BDF linear multistep method.  Recommended for
@@ -447,9 +423,9 @@ impl<V: Vector> CVode<(), V, ()>
     // The default Newton iteration is recommended for stiff problems,
     pub fn bdf<'a, F>(
         t0: f64, y0: &'a V, f: F
-    ) -> CVodeConf<'a, V, CB<V, F, fn(f64, &V, &mut [f64; 0]), [f64; 0]>>
+    ) -> CVodeConf<'a, V, CBNoRoots<V, F>>
     where F: FnMut(f64, &V, &mut V) + 'a {
-        CVodeConf::new("CVode::bdf", CV_BDF, t0, y0, f)
+        CVodeConf::new(CV_BDF, t0, y0, f)
     }
 }
 
@@ -493,7 +469,9 @@ pub trait Solver {
 
     /// Return the solution with initial conditions (`t0`, `y0`) at
     /// time `t`.  This is a convenience function.
-    fn cauchy(&mut self, t0: f64, y0: &Self::V, t: f64) -> (Self::V, CVStatus);
+    fn cauchy(
+        &mut self, t0: f64, y0: &Self::V, t: f64
+    ) -> Result<(f64, Self::V), Error>;
 
 
     type Roots;
@@ -521,26 +499,26 @@ where
 
     fn solve(&mut self, t: f64, y: &mut V) -> CVStatus {
         if V::len(y) != self.len {
-            return CVStatus::IllInput
+            return CVStatus::Error(Error::IllInput)
         }
         Self::integrate(self, t, y, CV_NORMAL).1
     }
 
     fn step(&mut self, t: f64, y: &mut V) -> (f64, CVStatus) {
         if V::len(y) != self.len {
-            return (t, CVStatus::IllInput)
+            return (t, CVStatus::Error(Error::IllInput))
         }
         Self::integrate(self, t, y, CV_ONE_STEP)
     }
 
-    fn cauchy(&mut self, t0: f64, y0: &V, t: f64) -> (V, CVStatus) {
+    fn cauchy(&mut self, t0: f64, y0: &V, t: f64) -> Result<(f64, V), Error> {
         let mut y = y0.clone();
         if V::len(&y) != self.len {
-            return (y, CVStatus::IllInput)
+            return Err(Error::IllInput)
         }
         // Avoid CVStatus::TooClose
         if t == t0 {
-            return (y, CVStatus::Ok)
+            return Ok((t, y))
         }
         let y0 = match unsafe { V::as_nvector(y0, self.ctx.as_ptr()) } {
             Some(y0) => y0,
@@ -555,8 +533,12 @@ where
         if ret != CV_SUCCESS {
             panic!("CVodeReInit returned code {ret}.  Please report.");
         }
-        let cv = self.solve(t, &mut y);
-        (y, cv)
+        match self.solve(t, &mut y) {
+            CVStatus::Ok => Ok((t, y)),
+            CVStatus::Tstop(t) => Ok((t, y)),
+            CVStatus::Root(t, _) => Ok((t, y)),
+            CVStatus::Error(e) => Err(e),
+        }
     }
 
     type Roots = Roots;
@@ -613,12 +595,12 @@ where Ctx: Context,
                 CVStatus::Root(tret, roots)
             }
             CV_MEM_NULL | CV_NO_MALLOC => unreachable!(),
-            CV_ILL_INPUT => CVStatus::IllInput,
-            CV_TOO_CLOSE => CVStatus::TooClose,
-            CV_TOO_MUCH_WORK => CVStatus::TooMuchWork,
-            CV_TOO_MUCH_ACC => CVStatus::TooMuchAcc,
-            CV_ERR_FAILURE => CVStatus::ErrFailure,
-            CV_CONV_FAILURE => CVStatus::ConvFailure,
+            CV_ILL_INPUT => CVStatus::Error(Error::IllInput),
+            CV_TOO_CLOSE => CVStatus::Error(Error::TooClose),
+            CV_TOO_MUCH_WORK => CVStatus::Error(Error::TooMuchWork),
+            CV_TOO_MUCH_ACC => CVStatus::Error(Error::TooMuchAcc),
+            CV_ERR_FAILURE => CVStatus::Error(Error::Failure),
+            CV_CONV_FAILURE => CVStatus::Error(Error::ConvFailure),
             CV_LINIT_FAIL => panic!("The linear solver interface’s \
                 initialization function failed."),
             CV_LSETUP_FAIL => panic!("The linear solver interface’s setup \

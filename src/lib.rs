@@ -41,10 +41,7 @@
 
 #![cfg_attr(feature = "nightly", feature(allocator_api))]
 
-use std::{
-    fmt::{self, Debug, Display, Formatter},
-    ptr
-};
+use std::ptr;
 use sundials_sys::*;
 
 #[cfg(test)]
@@ -85,24 +82,50 @@ pub mod linear_solver;
 //
 // Error
 
-#[derive(Debug)]
+/// Errors for this library.
+#[derive(Debug, Clone, Copy,  PartialEq)]
 pub enum Error {
-    /// The function or method failed with the attached message
-    /// (without further details).
-    Failure { name: &'static str, msg: &'static str },
+    /// Failed to allocate memory.
+    AllocFailure,
+    /// Incorrect inputs.
+    // FIXME: we may want to ensure it can never be returned using the
+    // type system.
+    IllInput,
+    /// The initial time `t0` and the output time `t` are too close to
+    /// each other and the user did not specify an initial step size.
+    TooClose,
+    /// The solver took `mxsteps` internal steps but could not reach the
+    /// final time.
+    TooMuchWork,
+    /// The solver could not satisfy the accuracy demanded by the user
+    /// for some internal step.
+    TooMuchAcc,
+    /// Error test failures occurred too many times during one
+    /// internal time step, or the minimum step size was reached.
+    Failure,
+    /// Convergence test failures occurred too many times during one
+    /// internal time step, or the minimum step size was reached.
+    ConvFailure,
 }
 
-impl Display for Error {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use Error::*;
         match self {
-            Error::Failure { name, msg} => {
-                if msg.is_empty() {
-                    write!(f, "The function {} failed.", name)
-                } else {
-                    write!(f, "The function {} failed with message: {}.",
-                           name, msg)
-                }
-            }
+            AllocFailure => writeln!(f, "Sundials could not allocate memory."),
+            IllInput => writeln!(f, "Sundials: incorrect inputs"),
+            TooClose =>
+                writeln!(f, "Sundials: the output time is too close to \
+                    the initial time."),
+            TooMuchWork =>
+                writeln!(f, "Sundials: could not reach final time after \
+                    `mxsteps`"),
+            TooMuchAcc =>
+                writeln!(f, "Sundials: could not satisfy the demanded \
+                    accuracy."),
+            Failure => writeln!(f, "Sundials: too many error test failures."),
+            ConvFailure =>
+                writeln!(f, "Sundials: too many convergence test failures."),
         }
     }
 }
@@ -253,10 +276,7 @@ impl __BoxedContext {
     ) -> Result<Self, Error> {
         let mut ctx: SUNContext = ptr::null_mut();
         if unsafe { SUNContext_Create(comm, &mut ctx as *mut _) } < 0 {
-            return Err(Error::Failure {
-                name: "Context::new",
-                msg: "Failed to create a context"
-            })
+            return Err(Error::AllocFailure)
         }
         Ok(Self(ctx))
     }

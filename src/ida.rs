@@ -3,4 +3,5 @@
 
 #[allow(dead_code)]
 /// Implicit differential-algebraic solver.
+#[allow(clippy::upper_case_acronyms)]
 pub struct IDA {}

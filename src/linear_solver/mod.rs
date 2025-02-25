@@ -23,16 +23,13 @@ impl LinSolver {
     /// # Safety
     /// The return value must not outlive `ctx`.
     pub(crate) unsafe fn spgmr(
-        name: &'static str, ctx: SUNContext,
+        ctx: SUNContext,
         vec: N_Vector,
     ) -> Result<Self, Error> {
         let linsolver = unsafe {
             SUNLinSol_SPGMR(vec, SUN_PREC_NONE as _, 30, ctx) };
         if linsolver.is_null() {
-            Err(Error::Failure {
-                name,
-                msg: "linear solver  allocation failed"
-            })
+            Err(Error::AllocFailure)
         } else {
             Ok(LinSolver(linsolver))
         }
