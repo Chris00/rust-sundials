@@ -8,7 +8,7 @@
 //! use sundials::{context, cvode::{CVode, Solver as _}};
 //! let mut ode = CVode::adams(0., &[0.], |t, u, du| *du = [1.])
 //!     .build(context!(P1)?)?;
-//! let (u1, _) = ode.cauchy(0., &[0.], 1.);
+//! let (_t1, u1) = ode.cauchy(0., &[0.], 1.)?;
 //! assert_eq!(u1[0], 1.);
 //! # Ok::<(), sundials::Error>(())
 //! ```
@@ -467,8 +467,11 @@ pub trait Solver {
     /// See [`solve`][Self::solve] for more information on the return value.
     fn step(&mut self, t: f64, y: &mut Self::V) -> (f64, CVStatus);
 
-    /// Return the solution with initial conditions (`t0`, `y0`) at
-    /// time `t`.  This is a convenience function.
+    /// Return `(t1, u1)` where `u1` is the solution with initial
+    /// conditions (`t0`, `y0`) at time `t1`.  Normally, `t1 = t`.  If
+    /// the solver stopped earlier because of [`CVStatus::Tstop`] or
+    /// [`CVStatus::Root`], `t1` is that time instead.  This is a
+    /// convenience function.
     fn cauchy(
         &mut self, t0: f64, y0: &Self::V, t: f64
     ) -> Result<(f64, Self::V), Error>;
@@ -637,15 +640,16 @@ mod tests {
             .build(ctx).unwrap();
         let mut u1 = [f64::NAN];
         let cv = ode.solve(0., &mut u1);
-        assert_eq!(cv, CVStatus::TooClose);
+        assert_eq!(cv, CVStatus::Error(Error::TooClose));
     }
 
     #[test]
-    fn cvode_solution() {
+    fn cvode_solution() -> Result<(), Error> {
         let mut ode = CVode::adams(0., &[0.],
             |_,_, du| *du = [1.])
             .build(context!().unwrap()).unwrap();
-        assert_eq!(ode.cauchy(0., &[0.], 1.).0, [1.]);
+        assert_eq!(ode.cauchy(0., &[0.], 1.)?.1, [1.]);
+        Ok(())
     }
 
     #[test]
@@ -677,20 +681,20 @@ mod tests {
             |_, _, du| *du = [1.]).build(ctx).unwrap();
         let mut u = [f64::NAN];
         assert_eq!(ode.solve(1., &mut u), CVStatus::Ok);
-        assert_eq!(ode.solve(0., &mut u), CVStatus::IllInput);
+        assert_eq!(ode.solve(0., &mut u), CVStatus::Error(Error::IllInput));
     }
 
     #[test]
-    fn cvode_move() {
+    fn cvode_move() -> Result<(), Error> {
         let ctx = context!().unwrap();
         let init = [0.];
         let ode = move || {
             CVode::adams(0., &init, |_,_, du| *du = [1.])
                 .build(ctx).unwrap()
         };
-        let (u, st) = ode().cauchy(0., &init, 1.);
+        let (_t, u) = ode().cauchy(0., &init, 1.)?;
         assert_eq!(u, [1.]);
-        assert_eq!(st, CVStatus::Ok)
+        Ok(())
     }
 
     #[test]
@@ -701,16 +705,16 @@ mod tests {
                 *du = [1., 1.]
             });
         let ctx = context!(P1)?;
-        assert_eq!(ode.clone().build(ctx)?.cauchy(0., &init, 1.).0, [2., 3.]);
+        assert_eq!(ode.clone().build(ctx)?.cauchy(0., &init, 1.)?.1, [2., 3.]);
         let ctx = context!(P2)?;
-        let (u, cv) = ode.clone()
+        let (t, u) = ode.clone()
             .root(|_, &u, z| *z = [u[0] - 2.])
             .build(ctx)?
-            .cauchy(0., &init, 2.);
-        assert!(matches!(cv, CVStatus::Root(_,_)));
+            .cauchy(0., &init, 2.)?;
+        assert!(t < 2.); // Root before the final time.
         assert_eq!(u, [2., 3.]);
         let ctx = context!(P3)?;
-        assert_eq!(ode.build(ctx)?.cauchy(0., &init, 2.).0, [3., 4.]);
+        assert_eq!(ode.build(ctx)?.cauchy(0., &init, 2.)?.1, [3., 4.]);
         Ok(())
     }
 
@@ -765,7 +769,7 @@ mod tests {
                 .build(context!()?)
         }
 
-        let (u1, _) = ode(1.)?.cauchy(0., &[1.], 1.);
+        let (_, u1) = ode(1.)?.cauchy(0., &[1.], 1.)?;
         assert_eq_tol!(u1[0], 1f64.exp(), 1e-4);
         Ok(())
     }
